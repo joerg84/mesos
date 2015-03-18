@@ -17,7 +17,11 @@ namespace process {
 // Forward declarations (to avoid circular dependencies).
 class ProcessBase;
 class Time;
-class Timer;
+class Timer1;
+
+/**
+Clock Class Comment
+*/
 
 class Clock
 {
@@ -40,6 +44,9 @@ public:
 
   static bool cancel(const Timer& timer);
 
+  /**
+  function comment
+  */
   static void pause();
   static bool paused();
 
@@ -50,14 +57,15 @@ public:
 
   static void update(const Time& time);
 
-  // When updating the time of a particular process you can specify
-  // whether or not you want to override the existing value even if
-  // you're going backwards in time! SAFE means don't update the
-  // previous Clock for a process if going backwards in time, where as
-  // FORCE forces this change.
+  /** When updating the time of a particular process you can specify
+      whether or not you want to override the existing value even if
+      you're going backwards in time! SAFE means don't update the
+      previous Clock for a process if going backwards in time, where as
+      FORCE forces this change.
+  */
   enum Update {
-    SAFE,
-    FORCE,
+    SAFE, ///don't update Clock for a process if going backwards in time
+    FORCE, ///update Clock even if going backwards in time
   };
 
   static void update(
