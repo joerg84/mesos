@@ -1,0 +1,17 @@
+/*! \page libprocess Libprocess Overview
+  \tableofcontents
+
+  Libprocess is the foundation layer..... <BR>
+  \link 3rdparty/libprocess/include  Libprocess Sources \endlink <BR>
+  \link process::Clock Clock \endlink
+
+  \section sec Overview
+
+  \section subsection1 Building libprocess
+  $ ./bootstrap # Unless you already have a distribution. <BR>
+  $ mkdir build && cd build # Optional. <BR>
+  $ path/to/configure <BR>
+  $ make <BR>
+  $ make check <BR>
+  /section examples Examples <BR>
+*/
