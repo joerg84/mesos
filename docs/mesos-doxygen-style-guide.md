@@ -4,15 +4,88 @@ layout: documentation
 
 # Mesos Doxygen Style Guide
 
-The Mesos codebase follows the
+At the time of writing, we are in the process of introducing a consistent style
+for [documenting Mesos source code](http://mesos.apache.org/api/latest/c++) 
+using [Doxygen](http://www.doxygen.org).
+This is an ongoing, incremental enhancement. 
+Both existing and new code may first appear without documentation. 
+However, whenever documentation is added, it should follow these guidelines.
 
+## Phrasing Guidelines
 
-[Google C++ Style Guide](http://google-styleguide.googlecode.com/svn/trunk/cppguide.xml) with the following differences:
+We follow the [IETF RFC2119](https://www.ietf.org/rfc/rfc2119.txt) 
+on how to use words such as "must", "should", "can", 
+and other requirement-related notions.
 
-## Overview Pages
+## Outside Source Code
+
+### Library and Component Overview Pages
+
+Substantial libraries, components, and subcomponents of the Mesos system such as
+stout, libprocess, master, slave, containerizer, allocator, and many more, 
+should have an overview page in markdown format that explains their 
+purpose, overall structure, and general use.
+
+This page must be located at the top directory of the library/component and 
+named after it, followed by "_overview.md". 
+Example: "containerizer_overview.md".
+
+### User Guides
+
+For libraries (stout, libprocess) we provide an extra user guide in a file
+called "REAMDE.md" at in their top level directory.
+If a user guide is given, the component overview must link to it and vice-versa.
+
+## In Source Code
+
+Doxygen documentation needs only to be applied to source code parts that 
+constitute an interface for which we want to generate Mesos API documentation
+files. Implementation code that does not participate in this should still be
+enhanced by source code comments as appropriate, but these comments do not need
+to follow the doxygen style.
+
+We follow the [Javadoc syntax]() to mark comment blocks. 
+These have the general form:
+
+    /**
+     * Brief summary.
+     *
+     * Detailed description. More detail.
+     * @see Some reference 
+     *
+     * @param <name> Parameter description.
+     * @return Return value description.
+     */
+     
+Example: 
+
+    /**
+     * Returns a compressed version of a string.
+     *
+     * Compresses an input string using the foobar algorithm.
+     *
+     * @param uncompressed The input string.
+     * @return A compressed version of the input string.
+     */
+     std::string compress(const std::string& uncompressed);
+     
+### Global Constants and Variables
+
+### Functions
+
+### Classes
+
+#### Methods
+
+#### Fields
+
+### Templates
+
+### Macros
 
 
 ### Markup Style
+
 There are a number of different doxygen
 <pre>
 # This is a level 1 header
