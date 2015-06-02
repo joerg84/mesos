@@ -44,6 +44,8 @@ public:
   std::string isolation;
   std::string default_role;
   Option<std::string> attributes;
+  Bytes fetcher_cache_size;
+  std::string fetcher_cache_dir;
   std::string work_dir;
   std::string launcher_dir;
   std::string hadoop_home; // TODO(benh): Make an Option.
@@ -93,6 +95,7 @@ public:
   Option<std::string> eth0_name;
   Option<std::string> lo_name;
   Option<Bytes> egress_rate_limit_per_container;
+  bool egress_unique_flow_per_container;
   bool network_enable_socket_statistics_summary;
   bool network_enable_socket_statistics_details;
 #endif

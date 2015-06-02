@@ -23,6 +23,7 @@
 
 #include <sys/types.h>
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -162,6 +163,7 @@ public:
       const ContainerID& containerId,
       const ExecutorInfo& executorInfo,
       const std::string& directory,
+      const Option<std::string>& rootfs,
       const Option<std::string>& user);
 
   virtual process::Future<Nothing> isolate(
@@ -205,6 +207,7 @@ private:
     const Interval<uint16_t> ephemeralPorts;
 
     Option<pid_t> pid;
+    Option<uint16_t> flowId;
   };
 
   // Define the metrics used by the port mapping network isolator.
@@ -215,6 +218,8 @@ private:
 
     process::metrics::Counter adding_eth0_ip_filters_errors;
     process::metrics::Counter adding_eth0_ip_filters_already_exist;
+    process::metrics::Counter adding_eth0_egress_filters_errors;
+    process::metrics::Counter adding_eth0_egress_filters_already_exist;
     process::metrics::Counter adding_lo_ip_filters_errors;
     process::metrics::Counter adding_lo_ip_filters_already_exist;
     process::metrics::Counter adding_veth_ip_filters_errors;
@@ -229,6 +234,8 @@ private:
     process::metrics::Counter adding_eth0_arp_filters_already_exist;
     process::metrics::Counter removing_eth0_ip_filters_errors;
     process::metrics::Counter removing_eth0_ip_filters_do_not_exist;
+    process::metrics::Counter removing_eth0_egress_filters_errors;
+    process::metrics::Counter removing_eth0_egress_filters_do_not_exist;
     process::metrics::Counter removing_lo_ip_filters_errors;
     process::metrics::Counter removing_lo_ip_filters_do_not_exist;
     process::metrics::Counter removing_veth_ip_filters_errors;
@@ -257,7 +264,8 @@ private:
       const hashmap<std::string, std::string>& _hostNetworkConfigurations,
       const Option<Bytes>& _egressRateLimitPerContainer,
       const IntervalSet<uint16_t>& _managedNonEphemeralPorts,
-      const process::Owned<EphemeralPortsAllocator>& _ephemeralPortsAllocator)
+      const process::Owned<EphemeralPortsAllocator>& _ephemeralPortsAllocator,
+      const std::set<uint16_t>& _flowIDs)
     : flags(_flags),
       eth0(_eth0),
       lo(_lo),
@@ -268,7 +276,8 @@ private:
       hostNetworkConfigurations(_hostNetworkConfigurations),
       egressRateLimitPerContainer(_egressRateLimitPerContainer),
       managedNonEphemeralPorts(_managedNonEphemeralPorts),
-      ephemeralPortsAllocator(_ephemeralPortsAllocator) {}
+      ephemeralPortsAllocator(_ephemeralPortsAllocator),
+      freeFlowIds(_flowIDs) {}
 
   // Continuations.
   Try<Nothing> _cleanup(Info* info, const Option<ContainerID>& containerId);
@@ -289,6 +298,7 @@ private:
   // Helper functions.
   Try<Nothing> addHostIPFilters(
       const routing::filter::ip::PortRange& range,
+      const Option<uint16_t>& flowId,
       const std::string& veth);
 
   Try<Nothing> removeHostIPFilters(
@@ -298,6 +308,8 @@ private:
 
   // Return the scripts that will be executed in the child context.
   std::string scripts(Info* info);
+
+  uint16_t getNextFlowId();
 
   const Flags flags;
 
@@ -322,6 +334,9 @@ private:
 
   process::Owned<EphemeralPortsAllocator> ephemeralPortsAllocator;
 
+  // Store a set of unused flow ID's on this slave.
+  std::set<uint16_t> freeFlowIds;
+
   hashmap<ContainerID, Info*> infos;
 
   // Recovered containers from a previous run that weren't managed by
@@ -341,7 +356,6 @@ public:
   {
     Flags();
 
-    bool help;
     Option<std::string> eth0_name;
     Option<std::string> lo_name;
     Option<pid_t> pid;
@@ -371,7 +385,6 @@ public:
   {
     Flags();
 
-    bool help;
     Option<pid_t> pid;
     bool enable_socket_statistics_summary;
     bool enable_socket_statistics_details;
