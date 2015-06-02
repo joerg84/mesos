@@ -1,0 +1,224 @@
+---
+layout: documentation
+---
+
+# Mesos Doxygen Style Guide
+
+At the time of writing, we are in the process of introducing a consistent style
+for [documenting Mesos source code](http://mesos.apache.org/api/latest/c++) 
+using [Doxygen](http://www.doxygen.org).
+This is an ongoing, incremental enhancement. 
+Both existing and new code may first appear without documentation. 
+However, whenever documentation is added, it should follow these guidelines.
+
+## Phrasing Guidelines
+
+We follow the [IETF RFC2119](https://www.ietf.org/rfc/rfc2119.txt) 
+on how to use words such as "must", "should", "can", 
+and other requirement-related notions.
+
+## Outside Source Code
+
+### Library and Component Overview Pages
+
+Substantial libraries, components, and subcomponents of the Mesos system such as
+stout, libprocess, master, slave, containerizer, allocator, and many more, 
+should have an overview page in markdown format that explains their 
+purpose, overall structure, and general use.
+
+This page must be located at the top directory of the library/component and 
+named after it, followed by "_overview.md". 
+Example: "containerizer_overview.md".
+
+### User Guides
+
+For libraries (stout, libprocess) we provide an extra user guide in a file
+called "REAMDE.md" at in their top level directory.
+If a user guide is given, the component overview must link to it and vice-versa.
+
+## In Source Code
+
+Doxygen documentation needs only to be applied to source code parts that 
+constitute an interface for which we want to generate Mesos API documentation
+files. Implementation code that does not participate in this should still be
+enhanced by source code comments as appropriate, but these comments do not need
+to follow the doxygen style.
+
+We follow the [Javadoc syntax]() to mark comment blocks. 
+These have the general form:
+
+    /**
+     * Brief summary.
+     *
+     * Detailed description. More detail.
+     * @see Some reference 
+     *
+     * @param <name> Parameter description.
+     * @return Return value description.
+     */
+     
+Example: 
+
+    /**
+     * Returns a compressed version of a string.
+     *
+     * Compresses an input string using the foobar algorithm.
+     *
+     * @param uncompressed The input string.
+     * @return A compressed version of the input string.
+     */
+     std::string compress(const std::string& uncompressed);
+     
+### Constants and Variables
+
+### Functions
+
+### Classes
+
+#### Methods
+
+#### Fields
+
+### Templates
+
+### Macros
+
+### Global declarations outside classes
+
+    /** @file */
+
+### Markup Style
+
+There are a number of different doxygen
+<pre>
+# This is a level 1 header
+## Level 2 header
+</pre>
+
+### CPP Style
+
+
+## Code
+
+### Examples
+Comment Style/// //! //*
+
+
+## Code
+<pre>
+/**
+ * ... JavaDoc style style text ...
+ */
+</pre>
+
+<pre>
+/*!
+ * ... Qt style text ...
+ */
+</pre>
+
+<pre>
+///
+/// ... text ...
+///
+</pre>
+
+<pre>
+//!
+//! ... text ...
+//!
+</pre>
+
+<pre>
+/*!
+ ...  text without intermediate *...
+*/
+</pre>
+
+
+Enum values are documented at the end of the same line (different styles):
+<pre>
+/*! A test class */
+class Test
+{
+  public:
+    /** An enum type. */
+    enum EnumType
+    {
+      int EVal1,     /**< enum value 1 */
+      int EVal2      /**< enum value 2 */
+    };
+    void member();   //!< a member function.
+
+  protected:
+    int value;       /*!< an integer value */
+};
+
+</pre>
+
+
+Elaborate example
+<pre>
+  //!  A test class.
+/*!
+  A more elaborate class description.
+*/
+class Test
+{
+  public:
+    //! An enum.
+    /*! More detailed enum description. */
+    enum TEnum {
+                 TVal1, /*!< Enum value TVal1. */
+                 TVal2, /*!< Enum value TVal2. */
+                 TVal3  /*!< Enum value TVal3. */
+               }
+         //! Enum pointer.
+         /*! Details. */
+         *enumPtr,
+         //! Enum variable.
+         /*! Details. */
+         enumVar;
+
+    //! A constructor.
+    /*!
+      A more elaborate description of the constructor.
+    */
+    Test();
+    //! A destructor.
+    /*!
+      A more elaborate description of the destructor.
+    */
+   ~Test();
+
+    //! A normal member taking two arguments and returning an integer value.
+    /*!
+      \param a an integer argument.
+      \param s a constant character pointer.
+      \return The test results
+      \sa Test(), ~Test(), testMeToo() and publicVar()
+    */
+    int testMe(int a,const char *s);
+
+    //! A pure virtual member.
+    /*!
+      \sa testMe()
+      \param c1 the first argument.
+      \param c2 the second argument.
+    */
+    virtual void testMeToo(char c1,char c2) = 0;
+
+    //! A public variable.
+    /*!
+      Details.
+    */
+    int publicVar;
+
+    //! A function variable.
+    /*!
+      Details.
+    */
+    int (*handler)(int a,int b);
+};
+</pre>
+Click here for the corresponding HTML documentation that is generated by doxygen.
