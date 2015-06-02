@@ -19,19 +19,28 @@ class ProcessBase;
 class Time;
 class Timer;
 
+/**
+ * Provides timers.
+ */
 class Clock
 {
 public:
-  // Initialize the clock with the specified callback that will be
-  // invoked whenever a batch of timers has expired.
-  //
+  /// Initialize the clock with the specified callback that will be
+  /// invoked whenever a batch of timers has expired.
+  ///
   // TODO(benh): Introduce a "channel" or listener pattern for getting
   // the expired Timers rather than passing in a callback. This might
   // mean we don't need 'initialize' or 'shutdown'.
   static void initialize(
       lambda::function<void(const std::list<Timer>&)>&& callback);
 
+  /**
+   * The current clock time for the current process that makes this call.
+   *
+   * @return This process' current clock time.
+   */
   static Time now();
+
   static Time now(ProcessBase* process);
 
   static Timer timer(
@@ -40,7 +49,10 @@ public:
 
   static bool cancel(const Timer& timer);
 
+  /// Pauses the clock e.g. for testing purposes.
   static void pause();
+  // Check whether clock is currently running.
+  /// /return Should we document trivial return types?
   static bool paused();
 
   static void resume();
@@ -50,14 +62,14 @@ public:
 
   static void update(const Time& time);
 
-  // When updating the time of a particular process you can specify
-  // whether or not you want to override the existing value even if
-  // you're going backwards in time! SAFE means don't update the
-  // previous Clock for a process if going backwards in time, where as
-  // FORCE forces this change.
+  /// When updating the time of a particular process you can specify
+  /// whether or not you want to override the existing value even if
+  /// you're going backwards in time! SAFE means don't update the
+  /// previous Clock for a process if going backwards in time, where as
+  /// FORCE forces this change.
   enum Update {
-    SAFE,
-    FORCE,
+    SAFE,  /*!< Don't update Clock for a process if going backwards in time. */
+    FORCE, /*!< Update Clock even if going backwards in time. */
   };
 
   static void update(
