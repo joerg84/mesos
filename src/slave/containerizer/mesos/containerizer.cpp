@@ -1224,10 +1224,12 @@ void MesosContainerizerProcess::____destroy(
   // registered. This could occur if the limitation (e.g., an OOM)
   // killed the executor and we triggered destroy() off the executor
   // exit.
+  vector<TaskStatus::Reason> reasons;
   if (!killed && container->limitations.size() > 0) {
     string message_;
     foreach (const ContainerLimitation& limitation, container->limitations) {
       message_ += limitation.message();
+      reasons.emplace_back(limitation.reason);
     }
     message = strings::trim(message_);
   } else if (!killed && message.isNone()) {
@@ -1243,6 +1245,10 @@ void MesosContainerizerProcess::____destroy(
 
   if (message.isSome()) {
     termination.set_message(message.get());
+  }
+
+  foreach (const TaskStatus::Reason& reason, reasons) {
+    termination.add_reasons(reason);
   }
 
   if (status.isReady() && status.get().isSome()) {

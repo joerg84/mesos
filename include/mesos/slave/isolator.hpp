@@ -22,6 +22,7 @@
 #include <list>
 #include <string>
 
+#include <mesos/mesos.hpp>
 #include <mesos/resources.hpp>
 
 // ONLY USEFUL AFTER RUNNING PROTOC.
@@ -38,6 +39,51 @@
 
 namespace mesos {
 namespace slave {
+
+// Forward declaration.
+class IsolatorProcess;
+
+// Information when an executor is impacted by a resource limitation
+// and should be terminated. Intended to support resources like memory
+// where the Linux kernel may invoke the OOM killer, killing some/all
+// of a container's processes.
+struct Limitation
+{
+  Limitation(
+      const Resources& _resources,
+      const std::string& _message,
+      const TaskStatus::Reason& _reason)
+    : resources(_resources),
+      message(_message),
+      reason(_reason) {}
+
+  // Resources that triggered the limitation.
+  // NOTE: 'Resources' is used here because the resource may span
+  // multiple roles (e.g. `"mem(*):1;mem(role):2"`).
+  Resources resources;
+
+  // Description of the limitation.
+  std::string message;
+
+  // Reason for terminaton.
+  TaskStatus::Reason reason;
+};
+
+
+// This struct is derived from slave::state::RunState. It contains
+// only those fields that are needed by Isolators for recovering the
+// containers. The reason for not using RunState instead is to avoid
+// any dependency on RunState and in turn on internal protobufs.
+struct ExecutorRunState
+{
+  ExecutorRunState(ContainerID id_, pid_t pid_, std::string directory_)
+    : id(id_), pid(pid_), directory(directory_) {}
+
+  ContainerID id;        // Container id of the last executor run.
+  pid_t pid;             // Executor pid.
+  std::string directory; // Executor work directory.
+};
+
 
 class Isolator
 {

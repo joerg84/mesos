@@ -4625,19 +4625,15 @@ void Slave::sendExecutorTerminatedStatusUpdate(
 
   CHECK_NOTNULL(executor);
 
-  if (executor->reason.isSome()) {
-    // TODO(nnielsen): We want to dispatch the task status and reason
-    // from the termination reason (MESOS-2035) and the executor
-    // reason based on a specific policy i.e. if the termination
-    // reason is set, this overrides executor->reason. At the moment,
-    // we infer the containerizer reason for killing from 'killed'
-    // field in 'termination' and are explicitly overriding the task
-    // status and reason.
-    reason = executor->reason.get();
-  } else if (termination.isReady() && termination.get().killed()) {
+  // TODO(joerg84): We need establish a way to differentiate between
+  // TASK_LOST and TASK_FAILURES more clearly.
+  if (termination.isReady() && termination.get().reasons_size() > 0) {
     taskState = TASK_FAILED;
-    // TODO(dhamon): MESOS-2035: Add 'reason' to containerizer::Termination.
-    reason = TaskStatus::REASON_MEMORY_LIMIT;
+    // TODO(joerg84): Handle multiple reasons (MESOS-2657).
+    reason = termination.get().reasons(0);
+
+  } else if (executor->reason.isSome()) {
+    reason = executor->reason.get();
   } else if (executor->isCommandExecutor()) {
     taskState = TASK_FAILED;
     reason = TaskStatus::REASON_COMMAND_EXECUTOR_FAILED;

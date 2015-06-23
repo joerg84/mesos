@@ -216,6 +216,8 @@ The Termination attribute `killed` is to be set only when the
 containerizer or the underlying isolation had to enforce a limitation
 by killing the task (e.g. task exceeded suggested memory limit).
 
+TODO(joerg84): Add description of reason.
+
 ## update
 ### Updates the container's resource limits
 

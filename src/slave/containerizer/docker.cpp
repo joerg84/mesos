@@ -1372,6 +1372,10 @@ void DockerContainerizerProcess::destroy(
     CHECK_PENDING(container->status.future());
     containerizer::Termination termination;
     termination.set_killed(killed);
+    termination.add_reasons(TaskStatus::REASON_DOCKER_LAUNCH_ERROR);
+
+
+
     termination.set_message(
         "Failed to launch container: " + container->launch.failure());
     container->termination.set(termination);
@@ -1415,6 +1419,7 @@ void DockerContainerizerProcess::destroy(
 
     containerizer::Termination termination;
     termination.set_killed(killed);
+    termination.add_reasons(TaskStatus::REASON_DOCKER_LAUNCH_ERROR);
     termination.set_message("Container destroyed while fetching");
     container->termination.set(termination);
 
@@ -1435,6 +1440,7 @@ void DockerContainerizerProcess::destroy(
 
     containerizer::Termination termination;
     termination.set_killed(killed);
+    termination.add_reasons(TaskStatus::REASON_DOCKER_LAUNCH_ERROR);
     termination.set_message("Container destroyed while pulling image");
     container->termination.set(termination);
 

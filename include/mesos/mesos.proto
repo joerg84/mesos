@@ -1098,6 +1098,9 @@ message TaskStatus {
   // (e.g. unhealthy vs. unregistered for maintenance).
   enum Reason {
     REASON_COMMAND_EXECUTOR_FAILED = 0;
+    REASON_CONTAINER_LAUNCH_ERROR = 19;
+    REASON_DISK_LIMIT = 20;
+    REASON_DOCKER_LAUNCH_ERROR = 21;
     REASON_EXECUTOR_PREEMPTED = 17;
     REASON_EXECUTOR_TERMINATED = 1;
     REASON_EXECUTOR_UNREGISTERED = 2;

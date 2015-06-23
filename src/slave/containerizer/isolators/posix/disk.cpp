@@ -250,7 +250,8 @@ void PosixDiskIsolatorProcess::_collect(
         info->limitation.set(protobuf::slave::createContainerLimitation(
             Resources(info->paths[path].quota),
             "Disk usage (" + stringify(future.get()) +
-            ") exceeds quota (" + stringify(quota.get()) + ")"));
+            ") exceeds quota (" + stringify(quota.get()) + ")",
+            TaskStatus::REASON_DISK_LIMIT));
       }
     }
   }

@@ -2524,9 +2524,6 @@ TEST_F(DockerContainerizerTest, ROOT_DOCKER_FetchFailure)
   EXPECT_EQ("Failed to launch container: some error from fetch",
              statusFailed.get().message());
 
-  // TODO(jaybuff): When MESOS-2035 is addressed we should validate
-  // that statusFailed.get().reason() is correctly set here.
-
   driver.stop();
   driver.join();
 
@@ -2626,9 +2623,6 @@ TEST_F(DockerContainerizerTest, ROOT_DOCKER_DockerPullFailure)
   EXPECT_EQ(TASK_FAILED, statusFailed.get().state());
   EXPECT_EQ("Failed to launch container: some error from docker pull",
              statusFailed.get().message());
-
-  // TODO(jaybuff): When MESOS-2035 is addressed we should validate
-  // that statusFailed.get().reason() is correctly set here.
 
   driver.stop();
   driver.join();
