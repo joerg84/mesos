@@ -135,6 +135,11 @@ public:
   void reviveOffers(
       const FrameworkID& frameworkId);
 
+  MesosAllocatorProcess* get()
+  {
+    return process;
+  }
+
 private:
   MesosAllocator();
   MesosAllocator(const MesosAllocator&); // Not copyable.
