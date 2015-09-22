@@ -100,12 +100,12 @@ struct Range
 };
 
 
-// Coalesces the `ranges` provided and modified `result` to contain the
+// Coalesces the vector of ranges provided and modifies `result` to contain the
 // solution.
 // The algorithm first sorts all the individual intervals so that we can iterate
 // over them sequentially.
 // The algorithm does a single pass, after the sort, and builds up the solution
-// in place. It then modified the `result` with as few steps as possible. The
+// in place. It then modifies the `result` with as few steps as possible. The
 // expensive part of this operation is modification of the protbuf, which is why
 // we prefer to build up the solution in a temporary vector.
 void coalesce(Value::Ranges* result, std::vector<Range>&& ranges) {
@@ -130,7 +130,7 @@ void coalesce(Value::Ranges* result, std::vector<Range>&& ranges) {
   uint64_t currentEnd = ranges.front().end;
 
   // In a single pass, we compute the size of the end result, as well as modify
-  // in place the intermediate data structure to build up the soltion as we
+  // in place the intermediate data structure to build up result as we
   // solve it.
   foreach (const Range& range, ranges) {
     // Skip if this range is equivalent to the current range.
@@ -145,12 +145,12 @@ void coalesce(Value::Ranges* result, std::vector<Range>&& ranges) {
 
     // If we are starting farther ahead, then there are 2 cases.
     else if (range.start > currentStart) {
-      // The range is contiguous.
+      // But ranges are overlapping and we can merge them.
       if (range.start <= currentEnd + 1) {
         currentEnd = std::max(currentEnd, range.end);
       }
 
-      // The previous range ended, and we are starting a new one.
+      // No overlap and we are adding a new range.
       else {
         ranges[count - 1].start = currentStart;
         ranges[count - 1].end = currentEnd;
@@ -161,13 +161,13 @@ void coalesce(Value::Ranges* result, std::vector<Range>&& ranges) {
     }
   }
 
-  // Record the state of the last range into the solution.
+  // Record the state of the last range into of ranges vector.
   ranges[count - 1].start = currentStart;
   ranges[count - 1].end = currentEnd;
 
   CHECK(count <= ranges.size());
 
-  // Make sure we shrink if we're too big.
+  // Shrink result if it is too large by deleting trailing subrange.
   if (count < result->range_size()) {
     result->mutable_range()
       ->DeleteSubrange(count, result->range_size() - count);
@@ -176,8 +176,9 @@ void coalesce(Value::Ranges* result, std::vector<Range>&& ranges) {
   // Resize enough space so we allocate the pointer array just once.
   result->mutable_range()->Reserve(count);
 
-  // Copy the solution from the ranges into result.
+  // Copy the solution from ranges vector into result.
   for (size_t i = 0; i < count; ++i) {
+    // result might be small and needs to be extended.
     if (i >= result->range_size()) {
       result->add_range();
     }
@@ -195,16 +196,18 @@ void coalesce(Value::Ranges* result, std::vector<Range>&& ranges) {
 
 // Coalesce the given 'rhs' ranges into 'lhs' ranges.
 void coalesce(Value::Ranges* lhs, std::initializer_list<Value::Ranges> rhs) {
-  size_t rhsSum = 0;
+  size_t rangesSum = lhs->range_size();
   foreach (const Value::Ranges& range, rhs) {
-    rhsSum += range.range_size();
+    rangesSum += range.range_size();
   }
 
-  std::vector<internal::Range> ranges(lhs->range_size() + rhsSum);
+  std::vector<internal::Range> ranges(rangesSum);
 
   // Merges the ranges into a vector.
   auto fill = [&ranges](const Value::Ranges& inputs, size_t offset) {
     for (size_t i = 0; i < inputs.range_size(); ++i) {
+      // Ensure target vector is large enough.
+      CHECK(ranges.size() >= inputs.range_size());
       ranges[offset + i].start = inputs.range(i).begin();
       ranges[offset + i].end = inputs.range(i).end();
     }
@@ -224,23 +227,24 @@ void coalesce(Value::Ranges* lhs, std::initializer_list<Value::Ranges> rhs) {
 }
 
 
-// Coalesce the given 'ranges'.
+// Coalesce the given Value::Ranges 'ranges'.
 void coalesce(Value::Ranges* ranges) {
   coalesce(ranges, {Value::Ranges()});
 }
 
 
-// Coalesce the given '_rhs' into 'lhs' ranges.
+// Coalesce the given range '_rhs' into 'lhs' ranges.
 void coalesce(Value::Ranges* lhs, const Value::Range& _rhs) {
   Value::Ranges rhs;
-  rhs.add_range();
-  rhs.mutable_range(0)->CopyFrom(_rhs);
+  Value::Range *range = rhs.add_range();
+  range->CopyFrom(_rhs);
   coalesce(lhs, {rhs});
 }
 
 
 // Removes a range from already coalesced ranges.
-// Note that we assume that ranges has already been coalesced.
+// The algorithms constructs a new vector of ranges which is then
+// coalesced into a Value::Ranges instance.
 static void remove(Value::Ranges* _ranges, const Value::Range& removal)
 {
   std::vector<internal::Range> ranges;
@@ -634,18 +638,6 @@ Try<Value> parse(const std::string& text)
   }
 
   return Error("Unexpected '[' found");
-}
-
-
-void sort(Value::Ranges* ranges)
-{
-  // Note that Range.begin() returns the first element of that range.
-  std::sort(
-      ranges->mutable_range()->begin(),
-      ranges->mutable_range()->end(),
-      [](const Value::Range& a, const Value::Range& b) {
-        return a.begin() < b.begin();
-      });
 }
 
 } // namespace values {

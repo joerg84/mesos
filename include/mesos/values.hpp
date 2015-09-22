@@ -57,9 +57,6 @@ namespace values {
 
 Try<Value> parse(const std::string& text);
 
-// Sorts the ranges according to ascending range.begin().
-void sort(Value::Ranges* ranges);
-
 } // namespace values {
 } // namespace internal {
 

@@ -123,35 +123,6 @@ TEST(ValuesTest, RangesParse)
 }
 
 
-// Unit test sorting given ranges.
-TEST(ValuesTest, RangesSort)
-{
-  // Explicitly construct [4-5, 1-2, 2-3, 6-7].
-  Value::Ranges ranges;
-  Value::Range* range = ranges.add_range();
-  range->set_begin(4);
-  range->set_end(5);
-  range = ranges.add_range();
-  range->set_begin(1);
-  range->set_end(2);
-  range = ranges.add_range();
-  range->set_begin(2);
-  range->set_end(3);
-  range = ranges.add_range();
-  range->set_begin(6);
-  range->set_end(7);
-
-  sort(&ranges);
-
-  // Should be [ 1-2, 2-3, 4-5, 6-7].
-  ASSERT_EQ(4, ranges.range_size());
-  EXPECT_EQ(1, ranges.range(0).begin());
-  EXPECT_EQ(2, ranges.range(1).begin());
-  EXPECT_EQ(4, ranges.range(2).begin());
-  EXPECT_EQ(6, ranges.range(3).begin());
-}
-
-
 // Unit test coalescing given ranges.
 TEST(ValuesTest, RangesCoalesce)
 {
@@ -171,7 +142,6 @@ TEST(ValuesTest, RangesCoalesce)
   range->set_begin(8);
   range->set_end(10);
 
-  sort(&ranges);
   mesos::coalesce(&ranges);
 
   // Should be [1-5, 7-10].
