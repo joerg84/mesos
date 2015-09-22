@@ -85,6 +85,47 @@ struct Deallocation
   hashmap<SlaveID, UnavailableResources> resources;
 };
 
+static Resource make_port_ranges(
+    const ::mesos::Value::Range& bounds, unsigned nranges)
+{
+  unsigned nports = bounds.end() - bounds.begin();
+  unsigned step = nports / nranges;
+  ::mesos::Value::Ranges ranges;
+
+  ranges.mutable_range()->Reserve(nranges);
+
+  for (auto i = 0; i < nranges; ++i) {
+    Value::Range *range = ranges.add_range();
+    unsigned start = bounds.begin() + (i * step);
+    unsigned end = start + 1;
+
+    range->set_begin(start);
+    range->set_end(end);
+    cout << "Range[" << (start) << "-" << (end) << "]" << endl;
+  }
+
+  Value values;
+  Resource resource;
+
+  values.set_type(Value::RANGES);
+  values.mutable_ranges()->CopyFrom(ranges);
+  resource.set_type(Value::RANGES);
+  resource.set_role("*");
+  resource.set_name("ports");
+  resource.mutable_ranges()->CopyFrom(values.ranges());
+
+  return resource;
+}
+
+static ::mesos::Value::Range
+make_range(unsigned begin, unsigned end)
+{
+  ::mesos::Value::Range range;
+  range.set_begin(begin);
+  range.set_end(end);
+  return range;
+}
+
 
 class HierarchicalAllocatorTestBase : public ::testing::Test
 {
@@ -1235,6 +1276,131 @@ TEST_P(HierarchicalAllocator_BENCHMARK_Test, AddAndUpdateSlave)
 
   cout << "Updated " << slaveCount << " slaves in " << watch.elapsed() << endl;
 }
+
+
+
+TEST_F(HierarchicalAllocator_BENCHMARK_Test, Jarvis)
+{
+  unsigned frameworkCount = 200;
+  unsigned slaveCount = 2000;
+  master::Flags flags;
+
+  FLAGS_v = 5;
+  __sync_synchronize(); // Ensure 'FLAGS_v' visible in other threads.
+
+  // Disable the background allocation task because we are going to call it
+  // manually.
+  flags.allocation_interval = Days(1);
+
+  Clock::pause();
+
+  // Number of allocations. This is used to determine the termination
+  // condition.
+  atomic<size_t> offerCount(0);
+
+  struct OfferedResources {
+    FrameworkID   frameworkId;
+    SlaveID       slaveId;
+    Resources     resources;
+  };
+
+  std::vector<OfferedResources> offers;
+
+  auto offerCallback = [&offerCount, &offers](
+      const FrameworkID& frameworkId,
+      const hashmap<SlaveID, Resources>& resources)
+  {
+    //cout << "offer callback for " << frameworkId << endl;
+    for (auto item : resources) {
+      OfferedResources r;
+      r.frameworkId = frameworkId;
+      r.slaveId = item.first;
+      r.resources = item.second;
+
+      offers.push_back(r);
+    }
+
+    offerCount++;
+  };
+
+  vector<SlaveInfo> slaves;
+  vector<FrameworkInfo> frameworks;
+
+  cout << "Using " << slaveCount << " slaves and " << frameworkCount << " frameworks" << endl;
+
+  slaves.reserve(slaveCount);
+  frameworks.reserve(frameworkCount);
+
+  initialize({}, flags, offerCallback);
+
+  for (auto i = 0; i < frameworkCount; ++i) {
+    frameworks.push_back(createFrameworkInfo("*"));
+    allocator->addFramework(frameworks[i].id(), frameworks[i], {});
+  }
+
+  Resources resources = Resources::parse(
+        "cpus:16;mem:2014;disk:1024;").get();
+  Resources ports = make_port_ranges(make_range(31000, 32000), 16);
+
+  cout << "base: " << resources << endl;
+  cout << "ports: " << ports << endl;
+
+  resources += ports;
+
+  for (auto i = 0; i < slaveCount; ++i) {
+    slaves.push_back(createSlaveInfo(
+        "cpus:24;mem:4096;disk:4096;ports:[31000-32000]"));
+
+    // Used resources on each slave. Let's say there are 16 tasks, each is
+    // allocated 1 cpu and a random port from the port range.
+    hashmap<FrameworkID, Resources> used;
+    used[frameworks[i % frameworkCount].id()] = resources;
+    allocator->addSlave(slaves[i].id(), slaves[i], None(), slaves[i].resources(), used);
+
+    // Use recoverResources() to decline the unallocated resources ...
+    cout << "used resources " << resources << endl;
+  }
+
+  // Wait for all the 'addSlave' operations to be processed.
+  while (offerCount.load() != slaveCount) {
+    os::sleep(Milliseconds(10));
+  }
+
+  for (auto count = 0; count < 10000; ++count) {
+
+    // Permanently decline any offered resources.
+    for (auto o : offers) {
+      Filters filters;
+
+      filters.set_refuse_seconds(INT_MAX);
+
+      allocator->recoverResources(o.frameworkId, o.slaveId, o.resources, filters);
+    }
+
+    Stopwatch watch;
+    watch.start();
+
+    offers.clear();
+    offerCount = 0;
+
+    {
+      using master::allocator::HierarchicalDRFAllocatorProcess;
+
+      HierarchicalDRFAllocator * hierarchical = dynamic_cast<HierarchicalDRFAllocator *>(allocator);
+      HierarchicalDRFAllocatorProcess * hproc = dynamic_cast<HierarchicalDRFAllocatorProcess *>(hierarchical->get());
+
+      watch.start();
+
+      hproc->allocate();
+      cout << "round " << count
+        << " allocate took " << watch.elapsed()
+        << " to make " << offerCount.load() << " offers"
+        << endl;
+    }
+  }
+
+}
+
 
 } // namespace tests {
 } // namespace internal {

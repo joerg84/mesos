@@ -173,6 +173,9 @@ public:
   void reviveOffers(
       const FrameworkID& frameworkId);
 
+  // Allocate any allocatable resources.
+  void allocate();
+
 protected:
   // Useful typedefs for dispatch/delay/defer to self()/this.
   typedef HierarchicalAllocatorProcess<RoleSorter, FrameworkSorter> Self;
@@ -181,8 +184,7 @@ protected:
   // Callback for doing batch allocations.
   void batch();
 
-  // Allocate any allocatable resources.
-  void allocate();
+
 
   // Allocate resources just from the specified slave.
   void allocate(const SlaveID& slaveId);
