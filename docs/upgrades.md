@@ -6,37 +6,64 @@ layout: documentation
 
 This document serves as a guide for users who wish to upgrade an existing Mesos cluster. Some versions require particular upgrade techniques when upgrading a running cluster. Some upgrades will have incompatible changes.
 
+## Overview
+
+This section provides an overview of the changes for each version (in particular when upgrading from the next lower version). For more details please check the respective sections below.
+
+We categorize the changes as follows:
+
+    A New feature/behavior
+    C Changed feature/behavior
+    D Deprecated feature/behavior
+    R Removed feature/behavior
+
+| Version | Core | Flags | Framework API | Module API | Endpoints |
+| ---------     |:------ |:------ |:------      |:------     |:------ |
+| 0.27.x        | -      | D [roles](#0-27-x-implicit-roles)  <br/> D [ACLs shutdown_frameworks](#0-27-x-acl-shutdown-flag) | C [executorLost callback](#0-27-x-executor-lost-callback)   | C [allocator API](#0-27-x-allocator-api) <br/> C [isolator API](#0-27-x-isolator-api)  | -|
+| 0.26.x        | -      |   -     | C [TaskStatus::Reason enum](#0-26-x-taskstatus-reason)  <br/> C [Credential  protobuf](#0-26-x-credential-protobuf)  <br/> C [NetworkInfo protobuf](#0-26-x-network-info-protobuf) | - | C [state endpoint](#0-26-x-state-endpoint) |
+| 0.25.x        | -      | - |  C [C++/Java/Python scheduler bindings](#0-25-x-scheduler-bindings) | - |  D [{*}.json endpoint](#0-25-x-json-endpoints)  |
+
 ## Upgrading from 0.26.x to 0.27.x ##
 
+<a name="0-27-x-implicit-roles"></a>
 * Mesos 0.27 introduces the concept of _implicit roles_. In previous releases, configuring roles required specifying a static whitelist of valid role names on master startup (via the `--roles` flag). In Mesos 0.27, if `--roles` is omitted, _any_ role name can be used; controlling which principals are allowed to register as which roles should be done using [ACLs](authorization.md). The role whitelist functionality is still supported but is deprecated.
 
+<a name="0-27-x-allocator-api"></a>
 * The Allocator API has changed due to the introduction of implicit roles. Custom allocator implementations will need to be updated. See [MESOS-4000](https://issues.apache.org/jira/browse/MESOS-4000) for more information.
 
+<a name="0-27-x-executor-lost-callback"></a>
 * The `executorLost` callback in the Scheduler interface will now be called whenever the slave detects termination of a custom executor. This callback was never called in previous versions, so please make sure any framework schedulers can now safely handle this callback. Note that this callback may not be reliably delivered.
 
+<a name="0-27-x-isolator-api"></a>
 * The isolator `prepare` interface has been changed slightly. Instead of keeping adding parameters to the `prepare` interface, we decide to use a protobuf (`ContainerConfig`). Also, we renamed `ContainerPrepareInfo` to `ContainerLaunchInfo` to better capture the purpose of this struct. See [MESOS-4240](https://issues.apache.org/jira/browse/MESOS-4240) and [MESOS-4282](https://issues.apache.org/jira/browse/MESOS-4282) for more information. If you are an isolator module writer, you will have to adjust your isolator module according to the new interface and re-compile with 0.27.
 
+<a name="0-27-x-acl-shutdown-flag"></a>
 * ACLs.shutdown_frameworks has been deprecated in favor of the new ACLs.teardown_frameworks. This affects the `--acls` master flag for the local authorizer.
 
 * Reserved resources are now accounted for in the DRF role sorter. Previously unaccounted reservations will influence the weighted DRF sorter. If role weights were explicitly set, they may need to be adjusted in order to account for the reserved resources in the cluster.
 
 ## Upgrading from 0.25.x to 0.26.x ##
 
+<a name="0-26-x-taskstatus-reason"></a>
 * The names of some TaskStatus::Reason enums have been changed. But the tag numbers remain unchanged, so it is backwards compatible. Frameworks using the new version might need to do some compile time adjustments:
 
   * REASON_MEM_LIMIT -> REASON_CONTAINER_LIMITATION_MEMORY
   * REASON_EXECUTOR_PREEMPTED -> REASON_CONTAINER_PREEMPTED
 
+<a name="0-26-x-credential-protobuf"></a>
 * The `Credential` protobuf has been changed. `Credential` field `secret` is now a string, it used to be bytes. This will affect framework developers and language bindings ought to update their generated protobuf with the new version. This fixes JSON based credentials file support.
 
+<a name="0-26-x-state-endpoint"></a>
 * The `/state` endpoints on master and slave will no longer include `data` fields as part of the JSON models for `ExecutorInfo` and `TaskInfo` out of consideration for memory scalability (see [MESOS-3794](https://issues.apache.org/jira/browse/MESOS-3794) and [this email thread](http://www.mail-archive.com/dev@mesos.apache.org/msg33536.html)).
   * On master, the affected `data` field was originally found via `frameworks[*].executors[*].data`.
   * On slaves, the affected `data` field was originally found via `executors[*].tasks[*].data`.
 
+<a name="0-26-x-network-info-protobuf"></a>
 * The `NetworkInfo` protobuf has been changed. The fields `protocol` and `ip_address` are now deprecated. The new field `ip_addresses` subsumes the information provided by them.
 
 ## Upgrading from 0.24.x to 0.25.x
 
+<a name="0-25-x-json-endpoints"></a>
 * The following endpoints will be deprecated in favor of new endpoints. Both versions will be available in 0.25 but the deprecated endpoints will be removed in a subsequent release.
 
   For master endpoints:
@@ -56,6 +83,7 @@ This document serves as a guide for users who wish to upgrade an existing Mesos 
   * /files/download.json becomes /files/download
   * /files/read.json becomes /files/read
 
+<a name="0-25-x-scheduler-bindings"></a>
 * The C++/Java/Python scheduler bindings have been updated. In particular, the driver can make a suppressOffers() call to stop receiving offers (until reviveOffers() is called).
 
 In order to upgrade a running cluster:
