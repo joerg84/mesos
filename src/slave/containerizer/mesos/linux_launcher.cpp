@@ -244,10 +244,12 @@ static int childSetup(const Option<lambda::function<int()>>& setup)
 }
 
 
-static Try<Nothing> assignFreezerHierarchy(pid_t child)
+Try<Nothing> assignFreezerHierarchy(pid_t child,
+  const string hierarchy,
+  const string cgroup)
 {
   // Create a freezer cgroup for this container if necessary.
-  Try<bool> exists = cgroups::exists(freezerHierarchy, cgroup(containerId));
+  Try<bool> exists = cgroups::exists(hierarchy, cgroup);
   if (exists.isError()) {
     return Error("Failed to check existence of freezer cgroup: " +
                  exists.error());
@@ -255,7 +257,7 @@ static Try<Nothing> assignFreezerHierarchy(pid_t child)
 
   if (!exists.get()) {
     Try<Nothing> created =
-      cgroups::create(freezerHierarchy, cgroup(containerId));
+      cgroups::create(hierarchy, cgroup);
 
     if (created.isError()) {
       return Error("Failed to create freezer cgroup: " + created.error());
@@ -265,16 +267,15 @@ static Try<Nothing> assignFreezerHierarchy(pid_t child)
   // Move the child into the freezer cgroup. Any grandchildren will
   // also be contained in the cgroup.
   Try<Nothing> assign = cgroups::assign(
-      freezerHierarchy,
-      cgroup(containerId),
-      child.get().pid());
+      hierarchy,
+      cgroup,
+      child);
 
   if (assign.isError()) {
-    LOG(ERROR) << "Failed to assign process " << child.get().pid()
-                << " of container '" << containerId << "'"
-                << " to its freezer cgroup: " << assign.error();
+    LOG(ERROR) << "Failed to assign process " << child
+               << " to its freezer cgroup: " << assign.error();
 
-    ::kill(child.get().pid(), SIGKILL);
+    ::kill(child, SIGKILL);
     return Error("Failed to contain process");
   }
 
@@ -308,7 +309,13 @@ Try<pid_t> LinuxLauncher::fork(
   }
 
   // Parent Hook for moving child into freezer cgroup.
-  parentHooks.emplace_back(Subprocess::Hook(&assignFreezerHierarchy));
+  const lambda::function<Try<Nothing>(pid_t)> test = lambda::bind(
+       assignFreezerHierarchy,
+       lambda::_1,
+       cgroup(containerId),
+       freezerHierarchy);
+  parentHooks.emplace_back(Subprocess::Hook(test));
+
 
   Try<Subprocess> child = subprocess(
       path,
