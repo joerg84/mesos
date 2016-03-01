@@ -15,7 +15,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <string>
+#include <mutex>
 
 #include <glog/logging.h>
 
@@ -33,6 +35,7 @@
 #include <stout/try.hpp>
 #include <stout/unreachable.hpp>
 
+using std::atomic_bool;
 using std::map;
 using std::string;
 using std::vector;
@@ -560,118 +563,58 @@ struct CloneConfig
 {
   CloneConfig() {}
 
-  vector<string> argv;
-//  Subprocess::IO in;
-//  Subprocess::IO out;
-  Option<flags::FlagsBase> flags;
-  Option<map<string, string>> environment;
+  char** argv;
+  char** environment;
+  string path;
+  InputFileDescriptors stdinfds;
+  OutputFileDescriptors stdoutfds;
+  OutputFileDescriptors stderrfds;
+  Option<atomic_bool*> barrier;
   Option<lambda::function<int()>> setup;
 };
 
 // The main entry of the child process.
 // Limits on setup.
-static int childCloneMain(void* config) {
-  std::cout << "childCloneMain" << std::endl;
-
+static int childCloneMain(void* config)
+{
+  // Get config.
   CloneConfig* conf = (CloneConfig*) config;
 
-  // Prepare the arguments. If the user specifies the 'flags', we will
-  // stringify them and append them to the existing arguments.
-  if (conf->flags.isSome()) {
-    foreachpair (const string& name, const flags::Flag& flag,
-       conf->flags.get()) {
-      Option<string> value = flag.stringify(conf->flags.get());
-      if (value.isSome()) {
-        conf->argv.push_back("--" + name + "=" + value.get());
-      }
+  // Close parent's end of the pipes.
+  if (conf->stdinfds.write.isSome()) {
+    ::close(conf->stdinfds.write.get());
+  }
+  if (conf->stdoutfds.read.isSome()) {
+    ::close(conf->stdoutfds.read.get());
+  }
+  if (conf->stderrfds.read.isSome()) {
+    ::close(conf->stderrfds.read.get());
+  }
+
+  // Redirect I/O for stdin/stdout/stderr.
+  while (::dup2(conf->stdinfds->read, STDIN_FILENO) == -1 && errno == EINTR);
+  while (::dup2(conf->stdoutfds->write, STDOUT_FILENO) == -1 && errno == EINTR);
+  while (::dup2(conf->stderrfds->write, STDERR_FILENO) == -1 && errno == EINTR);
+
+  // if blocking.
+  if (conf->barrier.isSome()) {
+  // Wait for parent process;
+  while (!(conf->barrier).get()->load());
+  }
+
+  // Execute child setup functions.
+  // Note these need be safe. TODO(joerg84): Document definition of safe.
+  if (conf->setup.isSome()) {
+    int status = conf->setup.get()();
+    if (status != 0) {
+      _exit(status);
     }
   }
 
-  // The real arguments that will be passed to 'os::execvpe'. We need
-  // to construct them here before doing the clone as it might not be
-  // async signal safe to perform the memory allocation.
-  char** _argv = new char*[conf->argv.size() + 1];
-  for (int i = 0; i < conf->argv.size(); ++i) {
-    _argv[i] = (char*) conf->argv[i].c_str();
-  }
-  _argv[conf->argv.size()] = NULL;
+  os::execvpe(conf->path.c_str(), conf->argv, conf->environment);
 
-
-
-execl("/bin/ls", "/bin/ls", "-r", "-t", "-l", (char *) 0);
-
-// os::execvpe(path.c_str(), argv, envp);
-
-ABORT("Failed to os::execvpe on path : " + os::strerror(errno));
+  ABORT("Failed to os::execvpe on path : " + os::strerror(errno));
 }
-//  // Close parent's end of the pipes.
-//  if (stdinfds.write.isSome()) {
-//    ::close(stdinfds.write.get());
-//  }
-//  if (stdoutfds.read.isSome()) {
-//    ::close(stdoutfds.read.get());
-//  }
-//  if (stderrfds.read.isSome()) {
-//    ::close(stderrfds.read.get());
-//  }
-//
-//  // Currently we will block the child's execution of the new process
-//  // until all the parent hooks (if any) have executed.
-//  if (blocking) {
-//    ::close(pipes[1]);
-//  }
-//
-//  // Redirect I/O for stdin/stdout/stderr.
-//  while (::dup2(stdinfds.read, STDIN_FILENO) == -1 && errno == EINTR);
-//  while (::dup2(stdoutfds.write, STDOUT_FILENO) == -1 && errno == EINTR);
-//  while (::dup2(stderrfds.write, STDERR_FILENO) == -1 && errno == EINTR);
-//
-//  // Close the copies. We need to make sure that we do not close the
-//  // file descriptor assigned to stdin/stdout/stderr in case the
-//  // parent has closed stdin/stdout/stderr when calling this
-//  // function (in that case, a dup'ed file descriptor may have the
-//  // same file descriptor number as stdin/stdout/stderr).
-//  if (stdinfds.read != STDIN_FILENO &&
-//      stdinfds.read != STDOUT_FILENO &&
-//      stdinfds.read != STDERR_FILENO) {
-//    ::close(stdinfds.read);
-//  }
-//  if (stdoutfds.write != STDIN_FILENO &&
-//      stdoutfds.write != STDOUT_FILENO &&
-//      stdoutfds.write != STDERR_FILENO) {
-//    ::close(stdoutfds.write);
-//  }
-//  if (stderrfds.write != STDIN_FILENO &&
-//      stderrfds.write != STDOUT_FILENO &&
-//      stderrfds.write != STDERR_FILENO) {
-//    ::close(stderrfds.write);
-//  }
-//
-//  if (blocking) {
-//    // Do a blocking read on the pipe until the parent signals us to
-//    // continue.
-//    char dummy;
-//    ssize_t length;
-//    while ((length = ::read(pipes[0], &dummy, sizeof(dummy))) == -1 &&
-//          errno == EINTR);
-//
-//    if (length != sizeof(dummy)) {
-//      ABORT("Failed to synchronize with parent");
-//    }
-//
-//    // Now close the pipe as we don't need it anymore.
-//    ::close(pipes[0]);
-//  }
-//
-//  if (setup.isSome()) {
-//    int status = setup.get()();
-//    if (status != 0) {
-//      _exit(status);
-//    }
-//  }
-//  LOG(INFO) << "Child Main BEFORE EXECVPE " << path;
-//  os::execvpe(path.c_str(), argv, envp);
-//
 
 
 Try<Subprocess> subprocess(
@@ -705,7 +648,7 @@ Try<Subprocess> subprocess(
   }
 
 #ifndef __linux__
-  // If not on LINUX we need to fallback.
+  // If not on LINUX we need to fallback as only Linux supports clone.
   int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
   cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
 
@@ -741,11 +684,9 @@ Try<Subprocess> subprocess(
         lambda::bind(&os::clone, lambda::_1, cloneFlags),
         parent_hooks);
   }
-
-  // Optimized forking/clone bahavior avoiding the copy-on-write view of the
+  // Optimized forking/clone behavior avoiding the copy-on-write view of the
   // address space.
-
-  struct CloneConfig cloneConfig;
+  LOG(INFO) << "Subprocess using optimized clone";
 
   // File descriptors for redirecting stdin/stdout/stderr.
   // These file descriptors are used for different purposes depending
@@ -763,6 +704,31 @@ Try<Subprocess> subprocess(
 
   stdinfds = input.get();
 
+  // Prepare the file descriptor(s) for stdout.
+  Try<OutputFileDescriptors> output = out.output();
+  if (output.isError()) {
+    internal::close(stdinfds, stdoutfds, stderrfds);
+    return Error(output.error());
+  }
+
+  stdoutfds = output.get();
+
+  // Prepare the file descriptor(s) for stderr.
+  output = err.output();
+  if (output.isError()) {
+    internal::close(stdinfds, stdoutfds, stderrfds);
+    return Error(output.error());
+  }
+
+  stderrfds = output.get();
+
+  // TODO(jieyu): Consider using O_CLOEXEC for atomic close-on-exec.
+  Try<Nothing> cloexec = internal::cloexec(stdinfds, stdoutfds, stderrfds);
+  if (cloexec.isError()) {
+    internal::close(stdinfds, stdoutfds, stderrfds);
+    return Error("Failed to cloexec: " + cloexec.error());
+  }
+
   // Prepare the arguments. If the user specifies the 'flags', we will
   // stringify them and append them to the existing arguments.
   if (flags.isSome()) {
@@ -774,16 +740,6 @@ Try<Subprocess> subprocess(
     }
   }
 
-<<<<<<< HEAD
-
-  int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
-  cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
-  cloneFlags |= CLONE_VM;
-
-  // Currently we will block the child's execution of the new process
-  // until all the `parent_hooks` (if any) have executed.
-  const bool blocking = !parent_hooks.empty();
-=======
   // The real arguments that will be passed to 'os::execvpe'. We need
   // to construct them here before doing the clone as it might not be
   // async signal safe to perform the memory allocation.
@@ -792,28 +748,47 @@ Try<Subprocess> subprocess(
     _argv[i] = (char*) argv[i].c_str();
   }
   _argv[argv.size()] = NULL;
->>>>>>> af7f19e... Subprocess.
-
-  long i =3;
-  unsigned int flags_ =0;
-
-  // Stack for the child.
-  // - unsigned long long used for best alignment.
-  // - 8 MiB appears to be the default for "ulimit -s" on OSX and Linux.
-  //
-  // NOTE: We need to allocate the stack dynamically. This is because
-  // glibc's 'clone' will modify the stack passed to it, therefore the
-  // stack must NOT be shared as multiple 'clone's can be invoked
-  // simultaneously.
-  int stackSize = 8 * 1024 * 1024;
-  unsigned long long *stack =
-    new unsigned long long[stackSize/sizeof(unsigned long long)];
 
 
-  pid_t pid = ::clone(childCloneMain,
-    &stack[stackSize/sizeof(stack[0]) - 1],  // stack grows down.
-    flags_,
-    (void*) &i);
+  // Like above, we need to construct the environment that we'll pass
+  // to 'os::execvpe' as it might not be async-safe to perform the
+  // memory allocations.
+  char** envp = os::raw::environment();
+
+  if (environment.isSome()) {
+    // NOTE: We add 1 to the size for a NULL terminator.
+    envp = new char*[environment.get().size() + 1];
+
+    size_t index = 0;
+    foreachpair (const string& key, const string& value, environment.get()) {
+      string entry = key + "=" + value;
+      envp[index] = new char[entry.size() + 1];
+      strncpy(envp[index], entry.c_str(), entry.size() + 1);
+      ++index;
+    }
+
+    envp[index] = NULL;
+  }
+
+  // barrier for blocking
+  atomic_bool* barrier = new atomic_bool(false);
+
+  // Create a cloneConfig which can be passed to childCloneMain.
+  struct CloneConfig* cloneConfig= new CloneConfig;
+  cloneConfig->argv = _argv;
+  cloneConfig->environment = envp;
+  cloneConfig->path = path;
+  cloneConfig->barrier = barrier;
+  cloneConfig->stdinfds = stdinfds;
+  cloneConfig->stdoutfds = stdoutfds;
+  cloneConfig->stderrfds = stderrfds;
+  cloneConfig->setup = setup;
+
+  int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
+  cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
+  cloneFlags |= CLONE_VM;
+
+  pid_t pid = os::clone_d(childCloneMain, cloneConfig, cloneFlags);
 
   if (pid == -1) {
     // Save the errno as 'close' below might overwrite it.
@@ -823,49 +798,35 @@ Try<Subprocess> subprocess(
     return error;
   }
 
-<<<<<<< HEAD
-  if (blocking) {
-    // Run the parent hooks.
-    foreach (const Subprocess::Hook& hook, parent_hooks) {
-      Try<Nothing> callback = hook.parent_callback(pid);
-=======
   // Run the parent hooks.
   foreach (const Subprocess::Hook& hook, parent_hooks) {
     Try<Nothing> callback = hook.parent_callback(pid);
->>>>>>> af7f19e... Subprocess.
 
-      // If the hook callback fails, we shouldn't proceed with the
-      // execution.
-      if (callback.isError()) {
-        LOG(WARNING)
-          << "Failed to execute Subprocess::Hook in parent for child '"
-          << pid << "': " << callback.error();
+    // If the hook callback fails, we shouldn't proceed with the
+    // execution and hence the child process should be killed.
+    if (callback.isError()) {
+      LOG(WARNING)
+        << "Failed to execute Subprocess::Hook in parent for child '"
+        << pid << "': " << callback.error();
 
 
-        // Close the child-ends of the file descriptors that are created
-        // by this function.
-        os::close(stdinfds.read);
-        os::close(stdoutfds.write);
-        os::close(stderrfds.write);
+      // Close the child-ends of the file descriptors that are created
+      // by this function.
+      os::close(stdinfds.read);
+      os::close(stdoutfds.write);
+      os::close(stderrfds.write);
 
-        // Ensure the child is killed.
-        ::kill(pid, SIGKILL);
+      // Ensure the child is killed.
+      ::kill(pid, SIGKILL);
 
-        return Error(
-            "Failed to execute Subprocess::Hook in parent for child '" +
-            stringify(pid) + "': " + callback.error());
-      }
+      return Error(
+          "Failed to execute Subprocess::Hook in parent for child '" +
+          stringify(pid) + "': " + callback.error());
     }
-
-    // Now that we've executed the parent hooks, we can signal the child to
-    // continue by writing to the pipe.
-    // char dummy;
-    // ssize_t length;
-    // while ((length = ::write(pipes[1], &dummy, sizeof(dummy))) == -1 &&
-    //        errno == EINTR);
   }
 
-  LOG(INFO) << "Subprocess after blocking";
+  // Signal child to continue.
+  barrier->store(true);
 
   // Parent.
   Subprocess process;
