@@ -298,14 +298,6 @@ Try<pid_t> LinuxLauncher::fork(
   // use CHECK.
   CHECK_EQ(0, ::pipe(pipes));
 
-  int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
-  cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
-  cloneFlags |= CLONE_VM; // Specify CLONE_VM in order share the address space.
-
-
-  LOG(INFO) << "Cloning child process with flags = "
-            << ns::stringify(cloneFlags);
-
   // If we are on systemd, then extend the life of the child. As with the
   // freezer, any grandchildren will also be contained in the slice.
   std::vector<Subprocess::Hook> parentHooks;
@@ -316,14 +308,15 @@ Try<pid_t> LinuxLauncher::fork(
   Try<Subprocess> child = subprocess(
       path,
       argv,
+      process::CloneBehavior::CLONE_F,
       in,
       out,
       err,
       flags,
       environment,
       lambda::bind(&childSetup, pipes, setup),
-      lambda::bind(&os::clone, lambda::_1, cloneFlags),
-      parentHooks);
+      parentHooks,
+      namespaces);
 
   if (child.isError()) {
     return Error("Failed to clone child process: " + child.error());
