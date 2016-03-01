@@ -136,6 +136,19 @@ public:
             pid_t(const lambda::function<int()>&)>>& clone,
         const std::vector<Subprocess::Hook>& parent_hooks);
 
+    friend Try<Subprocess> subprocess(
+      const std::string& path,
+      std::vector<std::string> argv,
+      const Option<CloneBehavior>& cloneBehavior,
+      const Subprocess::IO& in,
+      const Subprocess::IO& out,
+      const Subprocess::IO& err,
+      const Option<flags::FlagsBase>& flags,
+      const Option<std::map<std::string, std::string>>& environment,
+      const Option<lambda::function<int()>>& setup,
+      const std::vector<Subprocess::Hook>& parent_hooks,
+      const Option<int>& namespaces);
+
     IO(const lambda::function<Try<InputFileDescriptors>()>& _input,
        const lambda::function<Try<OutputFileDescriptors>()>& _output)
       : input(_input),
@@ -236,6 +249,19 @@ private:
       const Option<lambda::function<
           pid_t(const lambda::function<int()>&)>>& clone,
       const std::vector<Subprocess::Hook>& parent_hooks);
+
+    friend Try<Subprocess> subprocess(
+      const std::string& path,
+      std::vector<std::string> argv,
+      const Option<CloneBehavior>& cloneBehavior,
+      const Subprocess::IO& in,
+      const Subprocess::IO& out,
+      const Subprocess::IO& err,
+      const Option<flags::FlagsBase>& flags,
+      const Option<std::map<std::string, std::string>>& environment,
+      const Option<lambda::function<int()>>& setup,
+      const std::vector<Subprocess::Hook>& parent_hooks,
+      const Option<int>& namespaces);
 
   struct Data
   {
@@ -375,7 +401,8 @@ Try<Subprocess> subprocess(
     const Option<std::map<std::string, std::string>>& environment = None(),
     const Option<lambda::function<int()>>& setup = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
-      Subprocess::Hook::None());
+    Subprocess::Hook::None(),
+    const Option<int>& namespaces);
 
 } // namespace process {
 
