@@ -35,6 +35,13 @@
 
 namespace process {
 
+enum class cloneBehavior
+{
+  GZIP,
+  BZIP2,
+  XZ
+};
+
 /**
  * Represents a fork() exec()ed subprocess. Access is provided to the
  * input / output of the process, as well as the exit status. The
@@ -300,7 +307,8 @@ Try<Subprocess> subprocess(
     const Option<lambda::function<
         pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
-      Subprocess::Hook::None());
+      Subprocess::Hook::None(),
+    const Option<cloneBehavior>& cloneBehavior = None());
 
 
 /**
@@ -353,6 +361,35 @@ inline Try<Subprocess> subprocess(
       setup,
       clone,
       parent_hooks);
+}
+
+inline Try<Subprocess> subprocess(
+    const std::string& path,
+    std::vector<std::string> argv,
+    const Subprocess::IO& in = Subprocess::FD(STDIN_FILENO),
+    const Subprocess::IO& out = Subprocess::FD(STDOUT_FILENO),
+    const Subprocess::IO& err = Subprocess::FD(STDERR_FILENO),
+    const Option<flags::FlagsBase>& flags = None(),
+    const Option<std::map<std::string, std::string>>& environment = None(),
+    const Option<lambda::function<int()>>& setup = None(),
+    const Option<cloneBehavior>& cloneBehavior = None(),
+    const std::vector<Subprocess::Hook>& parent_hooks =
+      Subprocess::Hook::None())
+{
+  std::vector<std::string> argv = {"sh", "-c", command};
+
+  return subprocess(
+      "sh",
+      argv,
+      in,
+      out,
+      err,
+      None(),
+      environment,
+      setup,
+      None(),
+      parent_hooks,
+      cloneBehavior);
 }
 
 } // namespace process {

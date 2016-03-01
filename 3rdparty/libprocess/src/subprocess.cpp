@@ -323,6 +323,28 @@ static int childMain(
 }
 
 
+// The main entry of the child process.
+// Limits on setup.
+static int childCloneMain(
+    const string& path,
+    char** argv,
+    char** envp,
+    const Option<lambda::function<int()>>& setup,
+    const InputFileDescriptors& stdinfds,
+    const OutputFileDescriptors& stdoutfds,
+    const OutputFileDescriptors& stderrfds)
+{
+  if (setup.isSome()) {
+    int status = setup.get()();
+    if (status != 0) {
+      _exit(status);
+    }
+  }
+
+  os::execvpe(path.c_str(), argv, envp);
+}
+
+
 Try<Subprocess> subprocess(
     const string& path,
     vector<string> argv,
@@ -334,7 +356,8 @@ Try<Subprocess> subprocess(
     const Option<lambda::function<int()>>& setup,
     const Option<lambda::function<
         pid_t(const lambda::function<int()>&)>>& _clone,
-    const std::vector<Subprocess::Hook>& parent_hooks)
+    const std::vector<Subprocess::Hook>& parent_hooks,
+    const Option<string>& cloneBehavior)
 {
   // File descriptors for redirecting stdin/stdout/stderr.
   // These file descriptors are used for different purposes depending
