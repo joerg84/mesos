@@ -35,6 +35,13 @@
 
 namespace process {
 
+enum class CloneBehavior
+{
+  DEFAULT_FORK, // Default sys call fork.
+  CLONE, // Default os::clone + SIGCHLD.
+  CLONE_F // Default os::clone + CLONE_VM | SIGCHLD.
+};
+
 /**
  * Represents a fork() exec()ed subprocess. Access is provided to the
  * input / output of the process, as well as the exit status. The
@@ -128,6 +135,19 @@ public:
         const Option<lambda::function<
             pid_t(const lambda::function<int()>&)>>& clone,
         const std::vector<Subprocess::Hook>& parent_hooks);
+
+    friend Try<Subprocess> subprocess(
+      const std::string& path,
+      std::vector<std::string> argv,
+      const Option<CloneBehavior>& cloneBehavior,
+      const Subprocess::IO& in,
+      const Subprocess::IO& out,
+      const Subprocess::IO& err,
+      const Option<flags::FlagsBase>& flags,
+      const Option<std::map<std::string, std::string>>& environment,
+      const Option<lambda::function<int()>>& setup,
+      const std::vector<Subprocess::Hook>& parent_hooks,
+      const Option<int>& namespaces);
 
     IO(const lambda::function<Try<InputFileDescriptors>()>& _input,
        const lambda::function<Try<OutputFileDescriptors>()>& _output)
@@ -229,6 +249,20 @@ private:
       const Option<lambda::function<
           pid_t(const lambda::function<int()>&)>>& clone,
       const std::vector<Subprocess::Hook>& parent_hooks);
+
+    friend Try<Subprocess> subprocess(
+      const std::string& path,
+      std::vector<std::string> argv,
+      const Option<CloneBehavior>& cloneBehavior,
+      const Subprocess::IO& in,
+      const Subprocess::IO& out,
+      const Subprocess::IO& err,
+      const Option<flags::FlagsBase>& flags,
+      const Option<std::map<std::string, std::string>>& environment,
+      const Option<lambda::function<int()>>& setup,
+      const std::vector<Subprocess::Hook>& parent_hooks,
+      const Option<int>& namespaces
+      );
 
   struct Data
   {
@@ -354,6 +388,22 @@ inline Try<Subprocess> subprocess(
       clone,
       parent_hooks);
 }
+
+
+
+Try<Subprocess> subprocess(
+    const std::string& path,
+    std::vector<std::string> argv,
+    const Option<CloneBehavior>& cloneBehavior,
+    const Subprocess::IO& in = Subprocess::FD(STDIN_FILENO),
+    const Subprocess::IO& out = Subprocess::FD(STDOUT_FILENO),
+    const Subprocess::IO& err = Subprocess::FD(STDERR_FILENO),
+    const Option<flags::FlagsBase>& flags = None(),
+    const Option<std::map<std::string, std::string>>& environment = None(),
+    const Option<lambda::function<int()>>& setup = None(),
+    const std::vector<Subprocess::Hook>& parent_hooks =
+    Subprocess::Hook::None(),
+    const Option<int>& namespaces = None());
 
 } // namespace process {
 
