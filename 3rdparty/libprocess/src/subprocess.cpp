@@ -555,4 +555,51 @@ Try<Subprocess> subprocess(
   return process;
 }
 
+
+// The main entry of the child process.
+// Limits on setup.
+static int childCloneMain(
+    const string& path,
+    char** argv,
+    char** envp,
+    const Option<lambda::function<int()>>& setup,
+    const InputFileDescriptors& stdinfds,
+    const OutputFileDescriptors& stdoutfds,
+    const OutputFileDescriptors& stderrfds)
+{
+  if (setup.isSome()) {
+    int status = setup.get()();
+    if (status != 0) {
+      _exit(status);
+    }
+  }
+
+  // Sync with parent.
+
+  os::execvpe(path.c_str(), argv, envp);
+}
+
+
+Try<Subprocess> subprocess(
+    const std::string& path,
+    std::vector<std::string> argv,
+    const Option<CloneBehavior>& cloneBehavior,
+    const Subprocess::IO& in,
+    const Subprocess::IO& out,
+    const Subprocess::IO& err,
+    const Option<flags::FlagsBase>& flags,
+    const Option<std::map<std::string, std::string>>& environment,
+    const Option<lambda::function<int()>>& setup,
+    const std::vector<Subprocess::Hook>& parent_hooks)
+{
+  // If cloneBehavior is not set or equal default behavior use
+  // default implementation.
+  if (cloneBehavior.isNone() ||
+      cloneBehavior.get() == CloneBehavior::DEFAULT_FORK ) {
+    return Error("Default");
+  }
+
+  return Error("specified");
+}
+
 }  // namespace process {
