@@ -567,16 +567,16 @@ static int childCloneMain(
     const OutputFileDescriptors& stdoutfds,
     const OutputFileDescriptors& stderrfds)
 {
-  // Close parent's end of the pipes.
-  if (stdinfds.write.isSome()) {
-    ::close(stdinfds.write.get());
-  }
-  if (stdoutfds.read.isSome()) {
-    ::close(stdoutfds.read.get());
-  }
-  if (stderrfds.read.isSome()) {
-    ::close(stderrfds.read.get());
-  }
+  // // Close parent's end of the pipes.
+  // if (stdinfds.write.isSome()) {
+  //   ::close(stdinfds.write.get());
+  // }
+  // if (stdoutfds.read.isSome()) {
+  //   ::close(stdoutfds.read.get());
+  // }
+  // if (stderrfds.read.isSome()) {
+  //   ::close(stderrfds.read.get());
+  // }
 
   if (setup.isSome()) {
     int status = setup.get()();
@@ -585,31 +585,31 @@ static int childCloneMain(
     }
   }
 
-  // Redirect I/O for stdin/stdout/stderr.
-  while (::dup2(stdinfds.read, STDIN_FILENO) == -1 && errno == EINTR);
-  while (::dup2(stdoutfds.write, STDOUT_FILENO) == -1 && errno == EINTR);
-  while (::dup2(stderrfds.write, STDERR_FILENO) == -1 && errno == EINTR);
+  // // Redirect I/O for stdin/stdout/stderr.
+  // while (::dup2(stdinfds.read, STDIN_FILENO) == -1 && errno == EINTR);
+  // while (::dup2(stdoutfds.write, STDOUT_FILENO) == -1 && errno == EINTR);
+  // while (::dup2(stderrfds.write, STDERR_FILENO) == -1 && errno == EINTR);
 
-  // Close the copies. We need to make sure that we do not close the
-  // file descriptor assigned to stdin/stdout/stderr in case the
-  // parent has closed stdin/stdout/stderr when calling this
-  // function (in that case, a dup'ed file descriptor may have the
-  // same file descriptor number as stdin/stdout/stderr).
-  if (stdinfds.read != STDIN_FILENO &&
-      stdinfds.read != STDOUT_FILENO &&
-      stdinfds.read != STDERR_FILENO) {
-    ::close(stdinfds.read);
-  }
-  if (stdoutfds.write != STDIN_FILENO &&
-      stdoutfds.write != STDOUT_FILENO &&
-      stdoutfds.write != STDERR_FILENO) {
-    ::close(stdoutfds.write);
-  }
-  if (stderrfds.write != STDIN_FILENO &&
-      stderrfds.write != STDOUT_FILENO &&
-      stderrfds.write != STDERR_FILENO) {
-    ::close(stderrfds.write);
-  }
+  // // Close the copies. We need to make sure that we do not close the
+  // // file descriptor assigned to stdin/stdout/stderr in case the
+  // // parent has closed stdin/stdout/stderr when calling this
+  // // function (in that case, a dup'ed file descriptor may have the
+  // // same file descriptor number as stdin/stdout/stderr).
+  // if (stdinfds.read != STDIN_FILENO &&
+  //     stdinfds.read != STDOUT_FILENO &&
+  //     stdinfds.read != STDERR_FILENO) {
+  //   ::close(stdinfds.read);
+  // }
+  // if (stdoutfds.write != STDIN_FILENO &&
+  //     stdoutfds.write != STDOUT_FILENO &&
+  //     stdoutfds.write != STDERR_FILENO) {
+  //   ::close(stdoutfds.write);
+  // }
+  // if (stderrfds.write != STDIN_FILENO &&
+  //     stderrfds.write != STDOUT_FILENO &&
+  //     stderrfds.write != STDERR_FILENO) {
+  //   ::close(stderrfds.write);
+  // }
 
   // Sync with parent.
 
@@ -650,7 +650,22 @@ Try<Subprocess> subprocess(
   }
 
   if (cloneBehavior.isNone() ||
-      cloneBehavior.get() == CloneBehavior::DEFAULT_FORK )
+      cloneBehavior.get() == CloneBehavior::CLONE) {
+    int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
+    cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
+
+    return subprocess(
+        path,
+        argv,
+        in,
+        out,
+        err,
+        flags,
+        environment,
+        setup,
+        lambda::bind(&os::clone, lambda::_1, cloneFlags),
+        parent_hooks);
+  }
 
   // File descriptors for redirecting stdin/stdout/stderr.
   // These file descriptors are used for different purposes depending
@@ -765,11 +780,11 @@ Try<Subprocess> subprocess(
   Subprocess process;
   process.data->pid = pid;
 
-  // Close the child-ends of the file descriptors that are created
-  // by this function.
-  os::close(stdinfds.read);
-  os::close(stdoutfds.write);
-  os::close(stderrfds.write);
+  // // Close the child-ends of the file descriptors that are created
+  // // by this function.
+  // os::close(stdinfds.read);
+  // os::close(stdoutfds.write);
+  // os::close(stderrfds.write);
 
   // For any pipes, store the parent side of the pipe so that
   // the user can communicate with the subprocess.

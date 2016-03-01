@@ -261,7 +261,8 @@ private:
       const Option<std::map<std::string, std::string>>& environment,
       const Option<lambda::function<int()>>& setup,
       const std::vector<Subprocess::Hook>& parent_hooks,
-      const Option<int>& namespaces);
+      const Option<int>& namespaces
+      );
 
   struct Data
   {
@@ -402,7 +403,7 @@ Try<Subprocess> subprocess(
     const Option<lambda::function<int()>>& setup = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
     Subprocess::Hook::None(),
-    const Option<int>& namespaces);
+    const Option<int>& namespaces = None());
 
 } // namespace process {
 
