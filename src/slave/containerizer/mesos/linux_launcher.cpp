@@ -300,6 +300,8 @@ Try<pid_t> LinuxLauncher::fork(
 
   int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
   cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
+  cloneFlags |= CLONE_VM; // Specify CLONE_VM in order share the address space.
+
 
   LOG(INFO) << "Cloning child process with flags = "
             << ns::stringify(cloneFlags);
