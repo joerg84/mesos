@@ -555,4 +555,259 @@ Try<Subprocess> subprocess(
   return process;
 }
 
+
+// The main entry of the child process.
+// Limits on setup.
+static int childCloneMain(
+    const string& path,
+    char** argv,
+    char** envp,
+    const Option<lambda::function<int()>>& setup,
+    const InputFileDescriptors& stdinfds,
+    const OutputFileDescriptors& stdoutfds,
+    const OutputFileDescriptors& stderrfds)
+{
+  // // Close parent's end of the pipes.
+  // if (stdinfds.write.isSome()) {
+  //   ::close(stdinfds.write.get());
+  // }
+  // if (stdoutfds.read.isSome()) {
+  //   ::close(stdoutfds.read.get());
+  // }
+  // if (stderrfds.read.isSome()) {
+  //   ::close(stderrfds.read.get());
+  // }
+
+  if (setup.isSome()) {
+    int status = setup.get()();
+    if (status != 0) {
+      _exit(status);
+    }
+  }
+
+  // // Redirect I/O for stdin/stdout/stderr.
+  // while (::dup2(stdinfds.read, STDIN_FILENO) == -1 && errno == EINTR);
+  // while (::dup2(stdoutfds.write, STDOUT_FILENO) == -1 && errno == EINTR);
+  // while (::dup2(stderrfds.write, STDERR_FILENO) == -1 && errno == EINTR);
+
+  // // Close the copies. We need to make sure that we do not close the
+  // // file descriptor assigned to stdin/stdout/stderr in case the
+  // // parent has closed stdin/stdout/stderr when calling this
+  // // function (in that case, a dup'ed file descriptor may have the
+  // // same file descriptor number as stdin/stdout/stderr).
+  // if (stdinfds.read != STDIN_FILENO &&
+  //     stdinfds.read != STDOUT_FILENO &&
+  //     stdinfds.read != STDERR_FILENO) {
+  //   ::close(stdinfds.read);
+  // }
+  // if (stdoutfds.write != STDIN_FILENO &&
+  //     stdoutfds.write != STDOUT_FILENO &&
+  //     stdoutfds.write != STDERR_FILENO) {
+  //   ::close(stdoutfds.write);
+  // }
+  // if (stderrfds.write != STDIN_FILENO &&
+  //     stderrfds.write != STDOUT_FILENO &&
+  //     stderrfds.write != STDERR_FILENO) {
+  //   ::close(stderrfds.write);
+  // }
+
+  // Sync with parent.
+
+  // TODO(joerg84): Potentially move setuid logic from executor here.
+
+  os::execvpe(path.c_str(), argv, envp);
+}
+
+
+Try<Subprocess> subprocess(
+    const std::string& path,
+    std::vector<std::string> argv,
+    const Option<CloneBehavior>& cloneBehavior,
+    const Subprocess::IO& in,
+    const Subprocess::IO& out,
+    const Subprocess::IO& err,
+    const Option<flags::FlagsBase>& flags,
+    const Option<std::map<std::string, std::string>>& environment,
+    const Option<lambda::function<int()>>& setup,
+    const std::vector<Subprocess::Hook>& parent_hooks,
+    const Option<int>& namespaces)
+{
+  // If cloneBehavior is not set or equal default behavior use
+  // default implementation.
+  if (cloneBehavior.isNone() ||
+      cloneBehavior.get() == CloneBehavior::DEFAULT_FORK ) {
+    return subprocess(
+        path,
+        argv,
+        in,
+        out,
+        err,
+        flags,
+        environment,
+        setup,
+        None(),
+        parent_hooks);
+  }
+
+  if (cloneBehavior.isNone() ||
+      cloneBehavior.get() == CloneBehavior::CLONE) {
+    int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
+    cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
+
+    return subprocess(
+        path,
+        argv,
+        in,
+        out,
+        err,
+        flags,
+        environment,
+        setup,
+        lambda::bind(&os::clone, lambda::_1, cloneFlags),
+        parent_hooks);
+  }
+
+  // File descriptors for redirecting stdin/stdout/stderr.
+  // These file descriptors are used for different purposes depending
+  // on the specified I/O modes.
+  // See `Subprocess::PIPE`, `Subprocess::PATH`, and `Subprocess::FD`.
+  InputFileDescriptors stdinfds;
+  OutputFileDescriptors stdoutfds;
+  OutputFileDescriptors stderrfds;
+
+  // Prepare the file descriptor(s) for stdin.
+  Try<InputFileDescriptors> input = in.input();
+  if (input.isError()) {
+    return Error(input.error());
+  }
+
+  stdinfds = input.get();
+
+  // Prepare the file descriptor(s) for stdout.
+  Try<OutputFileDescriptors> output = out.output();
+  if (output.isError()) {
+    internal::close(stdinfds, stdoutfds, stderrfds);
+    return Error(output.error());
+  }
+
+  stdoutfds = output.get();
+
+  // Prepare the file descriptor(s) for stderr.
+  output = err.output();
+  if (output.isError()) {
+    internal::close(stdinfds, stdoutfds, stderrfds);
+    return Error(output.error());
+  }
+
+  stderrfds = output.get();
+
+  // TODO(jieyu): Consider using O_CLOEXEC for atomic close-on-exec.
+  Try<Nothing> cloexec = internal::cloexec(stdinfds, stdoutfds, stderrfds);
+  if (cloexec.isError()) {
+    internal::close(stdinfds, stdoutfds, stderrfds);
+    return Error("Failed to cloexec: " + cloexec.error());
+  }
+
+  // The real arguments that will be passed to 'os::execvpe'. We need
+  // to construct them here before doing the clone as it might not be
+  // async signal safe to perform the memory allocation.
+  char** _argv = new char*[argv.size() + 1];
+  for (int i = 0; i < argv.size(); i++) {
+    _argv[i] = (char*) argv[i].c_str();
+  }
+  _argv[argv.size()] = NULL;
+
+  // Like above, we need to construct the environment that we'll pass
+  // to 'os::execvpe' as it might not be async-safe to perform the
+  // memory allocations.
+  char** envp = os::raw::environment();
+
+  if (environment.isSome()) {
+    // NOTE: We add 1 to the size for a NULL terminator.
+    envp = new char*[environment.get().size() + 1];
+
+    size_t index = 0;
+    foreachpair (const string& key, const string& value, environment.get()) {
+      string entry = key + "=" + value;
+      envp[index] = new char[entry.size() + 1];
+      strncpy(envp[index], entry.c_str(), entry.size() + 1);
+      ++index;
+    }
+
+    envp[index] = NULL;
+  }
+
+  // Prepare clone function;
+  int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
+  cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
+  cloneFlags |= CLONE_VM; // Specify CLONE_VM in order share the address space.
+
+  lambda::function<pid_t(const lambda::function<int()>&)> clone =
+    lambda::bind(&os::clone, lambda::_1, cloneFlags);
+
+    // Now, clone the child process.
+  pid_t pid = clone(lambda::bind(
+      &childCloneMain,
+      path,
+      _argv,
+      envp,
+      setup,
+      stdinfds,
+      stdoutfds,
+      stderrfds));
+
+  delete[] _argv;
+
+  // Need to delete 'envp' if we had environment variables passed to
+  // us and we needed to allocate the space.
+  if (environment.isSome()) {
+    CHECK_NE(os::raw::environment(), envp);
+    delete[] envp;
+  }
+
+  // Check if clone() returned sucessfully
+  if (pid == -1) {
+    // Save the errno as 'close' below might overwrite it.
+    ErrnoError error("Failed to clone");
+    internal::close(stdinfds, stdoutfds, stderrfds);
+
+    return error;
+  }
+
+  // SIGNAL CHILD.
+
+  // Parent.
+  Subprocess process;
+  process.data->pid = pid;
+
+  // // Close the child-ends of the file descriptors that are created
+  // // by this function.
+  // os::close(stdinfds.read);
+  // os::close(stdoutfds.write);
+  // os::close(stderrfds.write);
+
+  // For any pipes, store the parent side of the pipe so that
+  // the user can communicate with the subprocess.
+  process.data->in = stdinfds.write;
+  process.data->out = stdoutfds.read;
+  process.data->err = stderrfds.read;
+
+  // Rather than directly exposing the future from process::reap, we
+  // must use an explicit promise so that we can ensure we can receive
+  // the termination signal. Otherwise, the caller can discard the
+  // reap future, and we will not know when it is safe to close the
+  // file descriptors.
+  Promise<Option<int>>* promise = new Promise<Option<int>>();
+  process.data->status = promise->future();
+
+  // We need to bind a copy of this Subprocess into the onAny callback
+  // below to ensure that we don't close the file descriptors before
+  // the subprocess has terminated (i.e., because the caller doesn't
+  // keep a copy of this Subprocess around themselves).
+  process::reap(process.data->pid)
+    .onAny(lambda::bind(internal::cleanup, lambda::_1, promise, process));
+
+  return process;
+}
+
 }  // namespace process {
