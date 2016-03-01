@@ -326,14 +326,15 @@ Try<pid_t> LinuxLauncher::fork(
   Try<Subprocess> child = subprocess(
       path,
       argv,
+      process::CloneBehavior::CLONE_F,
       in,
       out,
       err,
       flags,
       environment,
       lambda::bind(&childSetup, setup),
-      lambda::bind(&os::clone, lambda::_1, cloneFlags),
-      parentHooks);
+      parentHooks,
+      namespaces);
 
   if (child.isError()) {
     return Error("Failed to clone child process: " + child.error());
