@@ -2083,7 +2083,7 @@ TEST_F(ReservationTest, ArangoDBIssue)
   Filters filters;
   filters.set_refuse_seconds(0);
 
-  Resources unreserved = Resources::parse("cpus:1;mem:512").get();
+  Resources unreserved = Resources::parse("cpus:1;mem:128").get();
   Resources dynamicallyReserved = unreserved.flatten(
       frameworkInfo.role(), createReservationInfo(frameworkInfo.principal()));
   Resources dynamicallyReserved2 = unreserved.flatten(
@@ -2121,17 +2121,37 @@ TEST_F(ReservationTest, ArangoDBIssue)
   ASSERT_EQ(1u, offers.get().size());
   offer = offers.get()[0];
 
-  EXPECT_TRUE(Resources(offer.resources()).contains(dynamicallyReserved));
+  // Create Disk.
+  Resource volume = createPersistentVolume(
+      getDiskResource(Megabytes(128)),
+      "id1",
+      "path1",
+      None());
+
+  // Attempt to create a persistent volume using `acceptOffers`.
+  driver1.acceptOffers(
+      {offer.id()},
+      {CREATE(volume)},
+      filters);
 
   // The expectation for the next offer.
   EXPECT_CALL(sched, resourceOffers(&driver, _))
     .WillOnce(FutureArg<1>(&offers));
+
+  // Check that the persistent volume is contained in this offer.
+  EXPECT_TRUE(Resources(offer.resources()).contains(volume));
 
   // Reserve the resources.
   driver.acceptOffers({offer.id()}, {RESERVE(dynamicallyReserved2)}, filters);
 
   // In the next offer, expect an offer 2 reserved resources.
   AWAIT_READY(offers);
+
+  // Check that the persistent volume is still  contained in this offer.
+  EXPECT_TRUE(Resources(offer.resources()).contains(volume));
+
+  EXPECT_TRUE(Resources(offer.resources()).contains(
+      dynamicallyReserved + dynamicallyReserved2));
 
   ASSERT_EQ(2u, offers.get().size());
   offer = offers.get()[0];
