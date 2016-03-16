@@ -592,14 +592,13 @@ static int childCloneMain(void* config)
   }
 
   // Redirect I/O for stdin/stdout/stderr.
-  while (::dup2(conf->stdinfds->read, STDIN_FILENO) == -1 && errno == EINTR);
-  while (::dup2(conf->stdoutfds->write, STDOUT_FILENO) == -1 && errno == EINTR);
-  while (::dup2(conf->stderrfds->write, STDERR_FILENO) == -1 && errno == EINTR);
+  // while (::dup2(conf->stdinfds->read, STDIN_FILENO) == -1 && errno == EINTR);
+  // while (::dup2(conf->stdoutfds->write,STDOUT_FILENO)==-1 && errno == EINTR);
+  // while (::dup2(conf->stderrfds->write,STDERR_FILENO)==-1 && errno == EINTR);
 
-  // if blocking.
   if (conf->barrier.isSome()) {
-  // Wait for parent process;
-  while (!(conf->barrier).get()->load());
+    // Wait for parent process;
+    while (!(conf->barrier).get()->load());
   }
 
   // Execute child setup functions.

@@ -2889,14 +2889,13 @@ ProcessBase* ProcessManager::dequeue()
   // TODO(benh): Remove a process from this thread's runq. If there
   // are no processes to run, and this is not a dedicated thread, then
   // steal one from another threads runq.
-  LOG(INFO) << "dequeue ";
+  // LOG(INFO) << "dequeue ";
   ProcessBase* process = NULL;
 
   synchronized (runq_mutex) {
     if (!runq.empty()) {
       process = runq.front();
       VLOG(1) << "dequeue1 ";
-      std::cout << "TEST" << std::endl << std::endl;
       runq.pop_front();
       VLOG(1) << "dequeue2 ";
       // Increment the running count of processes in order to support
