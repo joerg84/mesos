@@ -75,6 +75,7 @@
 #include <process/sequence.hpp>
 #include <process/socket.hpp>
 #include <process/statistics.hpp>
+#include <process/subprocess.hpp>
 #include <process/system.hpp>
 #include <process/time.hpp>
 #include <process/timer.hpp>
@@ -2889,17 +2890,23 @@ ProcessBase* ProcessManager::dequeue()
   // TODO(benh): Remove a process from this thread's runq. If there
   // are no processes to run, and this is not a dedicated thread, then
   // steal one from another threads runq.
-
+  // LOG(INFO) << "dequeue ";
   ProcessBase* process = NULL;
 
   synchronized (runq_mutex) {
     if (!runq.empty()) {
       process = runq.front();
+      std::cout << "dequeue1 " << process << " " << process->pid
+                << std::endl;
+      Subprocess* subp = (Subprocess*) process;
+      std::cout << "dequeue1 subpro" << subp->data << " "<< std::endl;
       runq.pop_front();
+      std::cout << "dequeue1 ";
       // Increment the running count of processes in order to support
       // the Clock::settle() operation (this must be done atomically
       // with removing the process from the runq).
       running.fetch_add(1);
+      VLOG(1) << "dequeue2";
     }
   }
 

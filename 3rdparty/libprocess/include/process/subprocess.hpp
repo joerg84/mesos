@@ -236,7 +236,6 @@ public:
    */
   Future<Option<int>> status() const { return data->status; }
 
-private:
   friend Try<Subprocess> subprocess(
       const std::string& path,
       std::vector<std::string> argv,
