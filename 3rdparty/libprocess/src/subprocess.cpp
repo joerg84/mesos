@@ -786,31 +786,33 @@ Try<Subprocess> subprocess(
   cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
   cloneFlags |= CLONE_VM;
 
-  // Stack for the child.
-  // - unsigned long long used for best alignment.
-  // - 8 MiB appears to be the default for "ulimit -s" on OSX and Linux.
-  //
-  // NOTE: We need to allocate the stack dynamically. This is because
-  // glibc's 'clone' will modify the stack passed to it, therefore the
-  // stack must NOT be shared as multiple 'clone's can be invoked
-  // simultaneously.
-  int stackSize = 8 * 1024 * 1024;
-  unsigned long long *stack =
-    new unsigned long long[stackSize/sizeof(unsigned long long)];
+  // // Stack for the child.
+  // // - unsigned long long used for best alignment.
+  // // - 8 MiB appears to be the default for "ulimit -s" on OSX and Linux.
+  // //
+  // // NOTE: We need to allocate the stack dynamically. This is because
+  // // glibc's 'clone' will modify the stack passed to it, therefore the
+  // // stack must NOT be shared as multiple 'clone's can be invoked
+  // // simultaneously.
+  // int stackSize = 8 * 1024 * 1024;
+  // unsigned long long *stack =
+  //   new unsigned long long[stackSize/sizeof(unsigned long long)];
 
 
-  pid_t pid = ::clone(childCloneMain,
-    &stack[stackSize/sizeof(stack[0]) - 1],  // stack grows down.
-    cloneFlags,
-    (void*) cloneConfig);
+  // pid_t pid = ::clone(childCloneMain,
+  //   &stack[stackSize/sizeof(stack[0]) - 1],  // stack grows down.
+  //   cloneFlags,
+  //   (void*) cloneConfig);
 
-  if (pid == -1) {
-    // Save the errno as 'close' below might overwrite it.
-    ErrnoError error("Failed to clone");
-    internal::close(stdinfds, stdoutfds, stderrfds);
+  // if (pid == -1) {
+  //   // Save the errno as 'close' below might overwrite it.
+  //   ErrnoError error("Failed to clone");
+  //   internal::close(stdinfds, stdoutfds, stderrfds);
 
-    return error;
-  }
+  //   return error;
+  // }
+
+  pid_t pid = clone_d(childCloneMain, cloneConfig), cloneFlags);
 
   // Run the parent hooks.
   foreach (const Subprocess::Hook& hook, parent_hooks) {
