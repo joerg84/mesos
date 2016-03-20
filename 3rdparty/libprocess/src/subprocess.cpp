@@ -788,6 +788,23 @@ Try<Subprocess> subprocess(
 
   pid_t pid = os::clone_d(childCloneMain, cloneConfig, cloneFlags);
 
+  if (pid == -1) {
+    // Save the errno as 'close' below might overwrite it.
+    ErrnoError error("Failed to clone");
+    internal::close(stdinfds, stdoutfds, stderrfds);
+
+    return error;
+  }
+
+  if (pid == 0) {
+    // Save the errno as 'close' below might overwrite it.
+    ErrnoError error("Should not happen");
+    internal::close(stdinfds, stdoutfds, stderrfds);
+
+    return error;
+  }
+
+
   // Run the parent hooks.
   foreach (const Subprocess::Hook& hook, parent_hooks) {
     Try<Nothing> callback = hook.parent_callback(pid);
