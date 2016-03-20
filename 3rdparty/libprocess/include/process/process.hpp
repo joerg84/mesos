@@ -430,7 +430,7 @@ private:
 template <typename T>
 class Process : public virtual ProcessBase {
 public:
-  virtual ~Process() {}
+  virtual ~Process() { std::cout << "Process Destr";}
 
   /**
    * Returns the `PID` of the process.

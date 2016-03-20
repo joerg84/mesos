@@ -75,6 +75,7 @@
 #include <process/sequence.hpp>
 #include <process/socket.hpp>
 #include <process/statistics.hpp>
+#include <process/subprocess.hpp>
 #include <process/system.hpp>
 #include <process/time.hpp>
 #include <process/timer.hpp>
@@ -2895,9 +2896,12 @@ ProcessBase* ProcessManager::dequeue()
   synchronized (runq_mutex) {
     if (!runq.empty()) {
       process = runq.front();
-      VLOG(1) << "dequeue1 ";
+      std::cout << "dequeue1 " << process << " " << process->pid
+                << std::endl;
+      Subprocess* subp = (Subprocess*) process;
+      std::cout << "dequeue1 subpro" << subp->data << " "<< std::endl;
       runq.pop_front();
-      VLOG(1) << "dequeue2 ";
+      std::cout << "dequeue1 ";
       // Increment the running count of processes in order to support
       // the Clock::settle() operation (this must be done atomically
       // with removing the process from the runq).
