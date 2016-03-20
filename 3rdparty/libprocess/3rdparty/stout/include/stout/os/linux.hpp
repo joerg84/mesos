@@ -79,6 +79,37 @@ inline pid_t clone(const lambda::function<int()>& func, int flags)
   return pid;
 }
 
+inline pid_t clone_d( int(func)(void*), void* args, int flags)
+{
+  // Stack for the child.
+  // - unsigned long long used for best alignment.
+  // - 8 MiB appears to be the default for "ulimit -s" on OSX and Linux.
+  //
+  // NOTE: We need to allocate the stack dynamically. This is because
+  // glibc's 'clone' will modify the stack passed to it, therefore the
+  // stack must NOT be shared as multiple 'clone's can be invoked
+  // simultaneously.
+  int stackSize = 8 * 1024 * 1024;
+  unsigned long long *stack =
+    new unsigned long long[stackSize/sizeof(unsigned long long)];
+
+  pid_t pid = ::clone(
+      func,
+      &stack[stackSize/sizeof(stack[0]) - 1],  // stack grows down.
+      flags,
+      args);
+
+  // If CLONE_VM is not set, ::clone would create a process which runs in a
+  // separate copy of the memory space of the calling process. So we destroy the
+  // stack here to avoid memory leak. If CLONE_VM is set, ::clone would create a
+  // thread which runs in the same memory space with the calling process.
+  if (!(flags & CLONE_VM)) {
+    delete[] stack;
+  }
+
+  return pid;
+}
+
 
 inline Result<Process> process(pid_t pid)
 {
