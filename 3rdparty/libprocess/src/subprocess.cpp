@@ -566,9 +566,9 @@ struct CloneConfig
   char** argv;
   char** environment;
   string path;
-  InputFileDescriptors* stdinfds;
-  OutputFileDescriptors* stdoutfds;
-  OutputFileDescriptors* stderrfds;
+  InputFileDescriptors stdinfds;
+  OutputFileDescriptors stdoutfds;
+  OutputFileDescriptors stderrfds;
   Option<atomic_bool*> barrier;
   Option<lambda::function<int()>> setup;
 };
@@ -581,14 +581,14 @@ static int childCloneMain(void* config)
   CloneConfig* conf = (CloneConfig*) config;
 
   // Close parent's end of the pipes.
-  if (conf->stdinfds->write.isSome()) {
-    ::close(conf->stdinfds->write.get());
+  if (conf->stdinfds.write.isSome()) {
+    ::close(conf->stdinfds.write.get());
   }
-  if (conf->stdoutfds->read.isSome()) {
-    ::close(conf->stdoutfds->read.get());
+  if (conf->stdoutfds.read.isSome()) {
+    ::close(conf->stdoutfds.read.get());
   }
-  if (conf->stderrfds->read.isSome()) {
-    ::close(conf->stderrfds->read.get());
+  if (conf->stderrfds.read.isSome()) {
+    ::close(conf->stderrfds.read.get());
   }
 
   // Redirect I/O for stdin/stdout/stderr.
@@ -610,8 +610,7 @@ static int childCloneMain(void* config)
     }
   }
 
-  string path2 = conf->path;
-  os::execvpe(path2.c_str(), conf->argv, conf->environment);
+  os::execvpe(conf->path.c_str(), conf->argv, conf->environment);
 
   ABORT("Failed to os::execvpe on path : " + os::strerror(errno));
 }
@@ -770,17 +769,17 @@ Try<Subprocess> subprocess(
   }
 
   // barrier for blocking
-  atomic_bool barrier(false);
+  atomic_bool* barrier = new atomic_bool(false);
 
   // Create a cloneConfig which can be passed to childCloneMain.
   struct CloneConfig* cloneConfig= new CloneConfig;
   cloneConfig->argv = _argv;
   cloneConfig->environment = envp;
   cloneConfig->path = path;
-  cloneConfig->barrier = &barrier;
-  cloneConfig->stdinfds = &stdinfds;
-  cloneConfig->stdoutfds = &stdoutfds;
-  cloneConfig->stderrfds = &stderrfds;
+  cloneConfig->barrier = barrier;
+  cloneConfig->stdinfds = stdinfds;
+  cloneConfig->stdoutfds = stdoutfds;
+  cloneConfig->stderrfds = stderrfds;
   cloneConfig->setup = setup;
 
   int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
@@ -841,8 +840,7 @@ Try<Subprocess> subprocess(
   }
 
   // Signal child to continue.
-  barrier = true;
-  os::sleep(Seconds(1));
+  barrier->store(true);
 
   // Parent.
   Subprocess process;
