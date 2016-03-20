@@ -340,6 +340,8 @@ Try<pid_t> LinuxLauncher::fork(
     return Error("Failed to clone child process: " + child.error());
   }
 
+  LOG(INFO) << "After Cloning " <<  child.get().pid();
+
   if (!pids.contains(containerId)) {
     pids.put(containerId, child.get().pid());
   }
