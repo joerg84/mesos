@@ -773,15 +773,15 @@ Try<Subprocess> subprocess(
   atomic_bool barrier(false);
 
   // Create a cloneConfig which can be passed to childCloneMain.
-  struct CloneConfig cloneConfig;
-  cloneConfig.argv = _argv;
-  cloneConfig.environment = envp;
-  cloneConfig.path = path;
-  cloneConfig.barrier = &barrier;
-  cloneConfig.stdinfds = &stdinfds;
-  cloneConfig.stdoutfds = &stdoutfds;
-  cloneConfig.stderrfds = &stderrfds;
-  cloneConfig.setup = setup;
+  struct CloneConfig* cloneConfig= new CloneConfig;
+  cloneConfig->argv = _argv;
+  cloneConfig->environment = envp;
+  cloneConfig->path = path;
+  cloneConfig->barrier = &barrier;
+  cloneConfig->stdinfds = &stdinfds;
+  cloneConfig->stdoutfds = &stdoutfds;
+  cloneConfig->stderrfds = &stderrfds;
+  cloneConfig->setup = setup;
 
   int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
   cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
@@ -803,7 +803,7 @@ Try<Subprocess> subprocess(
   pid_t pid = ::clone(childCloneMain,
     &stack[stackSize/sizeof(stack[0]) - 1],  // stack grows down.
     cloneFlags,
-    (void*) &cloneConfig);
+    (void*) cloneConfig);
 
   if (pid == -1) {
     // Save the errno as 'close' below might overwrite it.
