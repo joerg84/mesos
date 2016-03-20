@@ -812,7 +812,7 @@ Try<Subprocess> subprocess(
   //   return error;
   // }
 
-  pid_t pid = clone_d(childCloneMain, cloneConfig), cloneFlags);
+  pid_t pid = os::clone_d(childCloneMain, cloneConfig, cloneFlags);
 
   // Run the parent hooks.
   foreach (const Subprocess::Hook& hook, parent_hooks) {
