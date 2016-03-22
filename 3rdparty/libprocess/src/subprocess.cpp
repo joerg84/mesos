@@ -244,12 +244,13 @@ static int childMain(
     const string& path,
     char** argv,
     char** envp,
-    const Option<lambda::function<int()>>& setup,
+    const bool setsid,
     const InputFileDescriptors& stdinfds,
     const OutputFileDescriptors& stdoutfds,
     const OutputFileDescriptors& stderrfds,
     bool blocking,
-    int pipes[2])
+    int pipes[2],
+    const Option<std::string>& chdir)
 {
   // Close parent's end of the pipes.
   if (stdinfds.write.isSome()) {
@@ -310,10 +311,20 @@ static int childMain(
     ::close(pipes[0]);
   }
 
-  if (setup.isSome()) {
-    int status = setup.get()();
-    if (status != 0) {
-      _exit(status);
+  if (setsid) {
+    // POSIX guarantees a forked child's pid does not match any existing
+    // process group id so only a single setsid() is required and the
+    // session id will be the pid.
+    // TODO(idownes): perror is not listed as async-signal-safe and
+    // should be reimplemented safely.
+    if (::setsid() == -1) {
+      ABORT("Failed to put child in a new session");
+    }
+  }
+
+  if (chdir.isSome()) {
+    if (::chdir(chdir->c_str()) == -1) {
+      ABORT("Failed to change directory");
     }
   }
 
@@ -329,12 +340,13 @@ Try<Subprocess> subprocess(
     const Subprocess::IO& in,
     const Subprocess::IO& out,
     const Subprocess::IO& err,
+    const bool setsid,
     const Option<flags::FlagsBase>& flags,
     const Option<map<string, string>>& environment,
-    const Option<lambda::function<int()>>& setup,
     const Option<lambda::function<
         pid_t(const lambda::function<int()>&)>>& _clone,
-    const std::vector<Subprocess::Hook>& parent_hooks)
+    const std::vector<Subprocess::Hook>& parent_hooks,
+    const Option<std::string>& chdir)
 {
   // File descriptors for redirecting stdin/stdout/stderr.
   // These file descriptors are used for different purposes depending
@@ -439,12 +451,13 @@ Try<Subprocess> subprocess(
       path,
       _argv,
       envp,
-      setup,
+      setsid,
       stdinfds,
       stdoutfds,
       stderrfds,
       blocking,
-      pipes));
+      pipes,
+      chdir));
 
   delete[] _argv;
 

@@ -122,12 +122,13 @@ public:
         const Subprocess::IO& in,
         const Subprocess::IO& out,
         const Subprocess::IO& err,
+        const bool setsid,
         const Option<flags::FlagsBase>& flags,
         const Option<std::map<std::string, std::string>>& environment,
-        const Option<lambda::function<int()>>& setup,
         const Option<lambda::function<
             pid_t(const lambda::function<int()>&)>>& clone,
-        const std::vector<Subprocess::Hook>& parent_hooks);
+        const std::vector<Subprocess::Hook>& parent_hooks,
+        const Option<std::string>& chdir);
 
     IO(const lambda::function<Try<InputFileDescriptors>()>& _input,
        const lambda::function<Try<OutputFileDescriptors>()>& _output)
@@ -223,12 +224,13 @@ private:
       const Subprocess::IO& in,
       const Subprocess::IO& out,
       const Subprocess::IO& err,
+      const bool setsid,
       const Option<flags::FlagsBase>& flags,
       const Option<std::map<std::string, std::string>>& environment,
-      const Option<lambda::function<int()>>& setup,
       const Option<lambda::function<
           pid_t(const lambda::function<int()>&)>>& clone,
-      const std::vector<Subprocess::Hook>& parent_hooks);
+      const std::vector<Subprocess::Hook>& parent_hooks,
+      const Option<std::string>& chdir);
 
   struct Data
   {
@@ -257,6 +259,11 @@ private:
   std::shared_ptr<Data> data;
 };
 
+// Flag describing whether a new process should generate a new sid.
+enum Setsid : bool {
+  SETSID = true,
+  NO_SETSID = false,
+};
 
 /**
  * Forks a subprocess and execs the specified 'path' with the
@@ -294,13 +301,14 @@ Try<Subprocess> subprocess(
     const Subprocess::IO& in = Subprocess::FD(STDIN_FILENO),
     const Subprocess::IO& out = Subprocess::FD(STDOUT_FILENO),
     const Subprocess::IO& err = Subprocess::FD(STDERR_FILENO),
+    const bool setsid = NO_SETSID,
     const Option<flags::FlagsBase>& flags = None(),
     const Option<std::map<std::string, std::string>>& environment = None(),
-    const Option<lambda::function<int()>>& setup = None(),
     const Option<lambda::function<
         pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
-      Subprocess::Hook::None());
+      Subprocess::Hook::None(),
+    const Option<std::string>& chdir = None());
 
 
 /**
@@ -333,12 +341,13 @@ inline Try<Subprocess> subprocess(
     const Subprocess::IO& in = Subprocess::FD(STDIN_FILENO),
     const Subprocess::IO& out = Subprocess::FD(STDOUT_FILENO),
     const Subprocess::IO& err = Subprocess::FD(STDERR_FILENO),
+    const bool setsid = NO_SETSID,
     const Option<std::map<std::string, std::string>>& environment = None(),
-    const Option<lambda::function<int()>>& setup = None(),
     const Option<lambda::function<
         pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
-      Subprocess::Hook::None())
+      Subprocess::Hook::None(),
+    const Option<std::string>& chdir = None())
 {
   std::vector<std::string> argv = {"sh", "-c", command};
 
@@ -348,11 +357,12 @@ inline Try<Subprocess> subprocess(
       in,
       out,
       err,
+      setsid,
       None(),
       environment,
-      setup,
       clone,
-      parent_hooks);
+      parent_hooks,
+      chdir);
 }
 
 } // namespace process {
