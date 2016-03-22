@@ -128,7 +128,8 @@ public:
         const Option<lambda::function<
             pid_t(const lambda::function<int()>&)>>& clone,
         const std::vector<Subprocess::Hook>& parent_hooks,
-        const Option<std::string>& chdir);
+        const Option<std::string>& chdir,
+        const bool watchdog);
 
     IO(const lambda::function<Try<InputFileDescriptors>()>& _input,
        const lambda::function<Try<OutputFileDescriptors>()>& _output)
@@ -230,7 +231,8 @@ private:
       const Option<lambda::function<
           pid_t(const lambda::function<int()>&)>>& clone,
       const std::vector<Subprocess::Hook>& parent_hooks,
-      const Option<std::string>& chdir);
+      const Option<std::string>& chdir,
+      const bool watchdog);
 
   struct Data
   {
@@ -263,6 +265,13 @@ private:
 enum Setsid : bool {
   SETSID = true,
   NO_SETSID = false,
+};
+
+// Flag describing whether a new process should be monitored by a seperate
+// watch process and be killed in case the parent process dies.
+enum WATCHDOG : bool {
+  MONITOR = true,
+  NO_MONITOR = false,
 };
 
 /**
@@ -308,7 +317,8 @@ Try<Subprocess> subprocess(
         pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
       Subprocess::Hook::None(),
-    const Option<std::string>& chdir = None());
+    const Option<std::string>& chdir = None(),
+    const bool watchdog = NO_MONITOR);
 
 
 /**
@@ -347,7 +357,8 @@ inline Try<Subprocess> subprocess(
         pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
       Subprocess::Hook::None(),
-    const Option<std::string>& chdir = None())
+    const Option<std::string>& chdir = None(),
+    const bool watchdog = NO_MONITOR)
 {
   std::vector<std::string> argv = {"sh", "-c", command};
 
@@ -362,7 +373,8 @@ inline Try<Subprocess> subprocess(
       environment,
       clone,
       parent_hooks,
-      chdir);
+      chdir,
+      watchdog);
 }
 
 } // namespace process {
