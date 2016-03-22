@@ -751,18 +751,6 @@ static int setup(const string& directory)
     }
   }
 
-  // Synchronize with parent process by reading a byte from stdin.
-  char c;
-  ssize_t length;
-  while ((length = read(STDIN_FILENO, &c, sizeof(c))) == -1 && errno == EINTR);
-
-  if (length != sizeof(c)) {
-    // This will occur if the slave terminates during executor launch.
-    // There's a reasonable probability this will occur during slave
-    // restarts across a large/busy cluster.
-    ABORT("Failed to synchronize with slave (it has probably exited)");
-  }
-
   return 0;
 }
 
@@ -1194,10 +1182,26 @@ Future<pid_t> DockerContainerizerProcess::launchExecutorProcess(
         self(),
         [=](const ContainerLogger::SubprocessInfo& subprocessInfo)
           -> Future<pid_t> {
+    std::vector<Subprocess::Hook> parentHooks;
+
+    // A hook that is executed in the parent process. It attempts to checkpoint
+    // the process pid.
+    // Note that the child process is blocked by the hook infrastructure while
+    // these hooks are executed.
+    // Note that returning Error implies the child process will be killed.
+    // Note that the DockerContainerizerProcess object will live
+    // beyond the execution of the parentHooks.
+    const lambda::function<Try<Nothing>(pid_t)> checkpointHook = lambda::bind(
+        &DockerContainerizerProcess::checkpoint,
+        this,
+        containerId,
+        lambda::_1);
+
+    parentHooks.emplace_back(Subprocess::Hook(checkpointHook));
+
+#ifdef __linux__
     // If we are on systemd, then extend the life of the executor. Any
     // grandchildren's lives will also be extended.
-    std::vector<Subprocess::Hook> parentHooks;
-#ifdef __linux__
     if (systemd::enabled()) {
       parentHooks.emplace_back(Subprocess::Hook(
           &systemd::mesos::extendLifetime));
@@ -1221,27 +1225,6 @@ Future<pid_t> DockerContainerizerProcess::launchExecutorProcess(
 
     if (s.isError()) {
       return Failure("Failed to fork executor: " + s.error());
-    }
-
-    // Checkpoint the executor's pid (if necessary).
-    Try<Nothing> checkpointed = checkpoint(containerId, s.get().pid());
-
-    if (checkpointed.isError()) {
-      return Failure(
-          "Failed to checkpoint executor's pid: " + checkpointed.error());
-    }
-
-    // Checkpoing complete, now synchronize with the process so that it
-    // can continue to execute.
-    CHECK_SOME(s.get().in());
-    char c;
-    ssize_t length;
-    while ((length = write(s.get().in().get(), &c, sizeof(c))) == -1 &&
-           errno == EINTR);
-
-    if (length != sizeof(c)) {
-      return Failure("Failed to synchronize with child process: " +
-                     os::strerror(errno));
     }
 
     return s.get().pid();
