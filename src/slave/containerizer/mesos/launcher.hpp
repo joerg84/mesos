@@ -70,7 +70,9 @@ public:
       const process::Subprocess::IO& err,
       const Option<flags::FlagsBase>& flags,
       const Option<std::map<std::string, std::string>>& environment,
-      const Option<int>& namespaces) = 0;
+      const Option<int>& namespaces,
+      std::vector<process::Subprocess::Hook> parentHooks =
+        process::Subprocess::Hook::None()) = 0;
 
   // Kill all processes in the containerized context.
   virtual process::Future<Nothing> destroy(const ContainerID& containerId) = 0;
@@ -100,7 +102,9 @@ public:
       const process::Subprocess::IO& err,
       const Option<flags::FlagsBase>& flags,
       const Option<std::map<std::string, std::string>>& environment,
-      const Option<int>& namespaces);
+      const Option<int>& namespaces,
+      std::vector<process::Subprocess::Hook> parentHooks =
+        process::Subprocess::Hook::None());
 
   virtual process::Future<Nothing> destroy(const ContainerID& containerId);
 
