@@ -487,13 +487,19 @@ private:
     // Add path on which 'du' must be run.
     command.push_back(entry->path);
 
-    // TODO(joerg84): Add correct killing behavior.
     Try<Subprocess> s = subprocess(
         "du",
         command,
         Subprocess::PATH("/dev/null"),
         Subprocess::PIPE(),
-        Subprocess::PIPE());
+        Subprocess::PIPE(),
+        process::NO_SETSID,
+        None(),
+        None(),
+        None(),
+        Subprocess::Hook::None(),
+        None(),
+        process::MONITOR);
 
     if (s.isError()) {
       entry->promise.fail("Failed to exec 'du': " + s.error());
