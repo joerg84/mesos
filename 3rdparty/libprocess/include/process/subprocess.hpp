@@ -289,17 +289,19 @@ enum WATCHDOG : bool {
  * @param in Redirection specification for stdin.
  * @param out Redirection specification for stdout.
  * @param err Redirection specification for stderr.
+ * @param setsid Indicator whether the process should be placed in a new
+ * session.
  * @param flags Flags to be stringified and appended to 'argv'.
  * @param environment Environment variables to use for the new
  *     subprocess or if None (the default) then the new subprocess
  *     will inherit the environment of the current process.
- * @param setup Function to be invoked after forking but before
- *     exec'ing. NOTE: Take extra care not to invoke any
- *     async unsafe code in the body of this function.
  * @param clone Function to be invoked in order to fork/clone the
  *     subprocess.
  * @param parent_hooks Hooks that will be executed in the parent
  *     before the child execs.
+ * @param chdir Directory in which the process should chdir before exec.
+ * @param watchdog Indicator whether to new process should be monitored
+ *     and killed if the parent process terminates.
  * @return The subprocess or an error if one occured.
  */
 // TODO(jmlvanre): Consider removing default argument for
