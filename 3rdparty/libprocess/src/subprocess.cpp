@@ -337,7 +337,7 @@ static int childMain(
     bool blocking,
     int pipes[2],
     const Option<std::string>& working_directory,
-    const WATCHDOG watchdog)
+    const Watchdog watchdog)
 {
   // Close parent's end of the pipes.
   if (stdinfds.write.isSome()) {
@@ -445,7 +445,7 @@ Try<Subprocess> subprocess(
         pid_t(const lambda::function<int()>&)>>& _clone,
     const std::vector<Subprocess::Hook>& parent_hooks,
     const Option<std::string>& working_directory,
-    const WATCHDOG watchdog)
+    const Watchdog watchdog)
 {
   // File descriptors for redirecting stdin/stdout/stderr.
   // These file descriptors are used for different purposes depending
