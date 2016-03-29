@@ -20,6 +20,8 @@
 #endif // __linux__
 #include <sys/types.h>
 
+#include <mutex>
+#include <condition_variable>
 #include <string>
 
 #include <glog/logging.h>
@@ -38,7 +40,9 @@
 #include <stout/try.hpp>
 #include <stout/unreachable.hpp>
 
+using std::condition_variable;
 using std::map;
+using std::mutex;
 using std::string;
 using std::vector;
 
@@ -434,6 +438,152 @@ static int childMain(
 }
 
 
+struct CloneConfig
+{
+  char** argv;
+  char** environment;
+  string path;
+  InputFileDescriptors stdinfds;
+  OutputFileDescriptors stdoutfds;
+  OutputFileDescriptors stderrfds;
+  Owned<mutex> mut;
+  Owned<bool> ready;
+  Owned<condition_variable> notifier;
+  Setsid setsid;
+  Watchdog watchdog;
+  Option<std::string> working_directory;
+};
+
+
+// Creates a seperate watchdog process to monitor the child process and
+// kill it in case the parent process dies.
+// Note: This function needs to be async signal safe. In fact,
+// all the library functions we used in this function are async
+// signal safe.
+static int watchdogSharedProcess()
+{
+#ifdef __linux__
+  // Send SIGTERM to the current process if the parent (i.e., the
+  // slave) exits.
+  // Note: This function should always succeed because we are passing
+  // in a valid signal.
+  prctl(PR_SET_PDEATHSIG, SIGTERM);
+
+  // Put the current process into a separate process group so that
+  // we can kill it and all its children easily.
+  if (setpgid(0, 0) != 0) {
+    abort();
+  }
+
+  // Install a SIGTERM handler which will kill the current process
+  // group. Since we already setup the death signal above, the
+  // signal handler will be triggered when the parent (e.g., the
+  // slave) exits.
+  if (os::signals::install(SIGTERM, &signalHandler) != 0) {
+    abort();
+  }
+
+  pid_t pid = fork();
+  if (pid == -1) {
+    abort();
+  } else if (pid == 0) {
+    // Child. This is the process that is going to exec the
+    // process if zero is returned.
+
+    // We setup death signal for the process as well in case
+    // someone, though unlikely, accidentally kill the parent of
+    // this process (the bookkeeping process).
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+
+    // NOTE: We don't need to clear the signal handler explicitly
+    // because the subsequent 'exec' will clear them.
+    return 0;
+  } else {
+    // Parent. This is the bookkeeping process which will wait for
+    // the child process to finish.
+
+    // Close the files to prevent interference on the communication
+    // between the slave and the child process.
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+
+    // Block until the child process finishes.
+    int status = 0;
+    if (waitpid(pid, &status, 0) == -1) {
+      abort();
+    }
+
+    // Forward the exit status if the child process exits normally.
+    if (WIFEXITED(status)) {
+      _exit(WEXITSTATUS(status));
+    }
+
+    abort();
+    UNREACHABLE();
+  }
+#endif
+  return 0;
+}
+
+
+// The main entry of the optimized child process running in the same address
+// space.
+// Limits on setup.
+static int childMainShared(void* conf) {
+  Owned<CloneConfig> config = Owned<CloneConfig>((CloneConfig*) conf);
+  // TODO(joerg84): Add consistency checks.
+
+  // Close parent's end of the pipes.
+  if (config->stdinfds.write.isSome()) {
+    ::close(config->stdinfds.write.get());
+  }
+  if (config->stdoutfds.read.isSome()) {
+    ::close(config->stdoutfds.read.get());
+  }
+  if (config->stderrfds.read.isSome()) {
+    ::close(config->stderrfds.read.get());
+  }
+
+  // Redirect I/O for stdin/stdout/stderr.
+  while (::dup2(config->stdinfds.read, STDIN_FILENO) == -1 &&
+      errno == EINTR);
+  while (::dup2(config->stdoutfds.write, STDOUT_FILENO) == -1 &&
+      errno == EINTR);
+  while (::dup2(config->stderrfds.write, STDERR_FILENO) == -1 &&
+     errno == EINTR);
+
+  // Wait for parent process;
+  std::unique_lock<mutex> lk(*(config->mut));
+  config->notifier->wait(lk, [&config]{return config->ready.get();});
+
+  if (config->setsid == SETSID) {
+    // POSIX guarantees a forked child's pid does not match any existing
+    // process group id so only a single setsid() is required and the
+    // session id will be the pid.
+    if (::setsid() == -1) {
+      ABORT("Failed to put child in a new session");
+    }
+  }
+
+  if (config->working_directory.isSome()) {
+    if (::chdir(config->working_directory->c_str()) == -1) {
+      ABORT("Failed to change directory");
+    }
+  }
+
+  // If the process should die together with its parent we spawn an seperate
+  // watchdog process which kill the child in such case.
+  if (config->watchdog == MONITOR) {
+    watchdogSharedProcess();
+  }
+
+  os::execvpe(config->path.c_str(), config->argv, config->environment);
+
+  ABORT("Failed to os::execvpe on path : " + os::strerror(errno));
+}
+
+
 Try<Subprocess> subprocess(
     const string& path,
     vector<string> argv,
@@ -530,6 +680,106 @@ Try<Subprocess> subprocess(
 
     envp[index] = NULL;
   }
+
+#ifdef __linux__
+  // If we are on linux and no custom clone function is specified we can use an
+  // optimized clone version avoiding the effort to duplicate the address space.
+  if (!_clone.isSome()){
+    // Setup signaling to child.
+    // NOTE: These variables are shared (and cleaned up) with the child.
+    Owned<bool> ready = Owned<bool>(new bool);
+    Owned<mutex> mut = Owned<mutex>(new mutex);
+    Owned<condition_variable> notifier =
+      Owned<condition_variable>(new condition_variable);
+
+    // NOTE: The child is responsible for cleaning up all related storage.
+    struct CloneConfig* cloneConfig = new CloneConfig;
+    cloneConfig->ready = ready;
+    cloneConfig->mut = mut;
+    cloneConfig->notifier = notifier;
+
+    cloneConfig->stdinfds = stdinfds;
+    cloneConfig->stdoutfds = stdoutfds;
+    cloneConfig->stderrfds = stderrfds;
+
+    int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
+    cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
+    cloneFlags |= CLONE_VM; // Specify CLONE_VM in order to avoid a
+                            // copy-on-write view on the address space.
+
+    pid_t pid = os::clone_d(childMainShared, cloneConfig, cloneFlags);
+
+    // Run the parent hooks.
+    foreach (const Subprocess::Hook& hook, parent_hooks) {
+      Try<Nothing> callback = hook.parent_callback(pid);
+
+      // If the hook callback fails, we shouldn't proceed with the
+      // execution and hence the child process should be killed.
+      if (callback.isError()) {
+        LOG(WARNING)
+          << "Failed to execute Subprocess::Hook in parent for child '"
+          << pid << "': " << callback.error();
+
+
+        // Close the child-ends of the file descriptors that are created
+        // by this function.
+        os::close(stdinfds.read);
+        os::close(stdoutfds.write);
+        os::close(stderrfds.write);
+
+        // Ensure the child is killed.
+        ::kill(pid, SIGKILL);
+
+        return Error(
+            "Failed to execute Subprocess::Hook in parent for child '" +
+            stringify(pid) + "': " + callback.error());
+      }
+    }
+
+    // Signal child to continue.
+    {
+      std::lock_guard<std::mutex> lk(*mut);
+      *(ready.get()) = true;
+    }
+    notifier->notify_one();
+
+    // Parent.
+    Subprocess process;
+    process.data->pid = pid;
+
+    // Close the child-ends of the file descriptors that are created
+    // by this function.
+    os::close(stdinfds.read);
+    os::close(stdoutfds.write);
+    os::close(stderrfds.write);
+
+    // For any pipes, store the parent side of the pipe so that
+    // the user can communicate with the subprocess.
+    process.data->in = stdinfds.write;
+    process.data->out = stdoutfds.read;
+    process.data->err = stderrfds.read;
+
+    // Rather than directly exposing the future from process::reap, we
+    // must use an explicit promise so that we can ensure we can receive
+    // the termination signal. Otherwise, the caller can discard the
+    // reap future, and we will not know when it is safe to close the
+    // file descriptors.
+    Promise<Option<int>>* promise = new Promise<Option<int>>();
+    process.data->status = promise->future();
+
+    // We need to bind a copy of this Subprocess into the onAny callback
+    // below to ensure that we don't close the file descriptors before
+    // the subprocess has terminated (i.e., because the caller doesn't
+    // keep a copy of this Subprocess around themselves).
+    process::reap(process.data->pid)
+      .onAny(lambda::bind(internal::cleanup, lambda::_1, promise, process));
+
+    return process;
+  }
+#endif // __linux__
+
+  // If we are not on linux or a custom clone function is specified we
+  // will continue using that clone function.
 
   // Determine the function to clone the child process. If the user
   // does not specify the clone function, we will use the default.
