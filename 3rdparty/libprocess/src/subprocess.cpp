@@ -20,6 +20,8 @@
 #endif // __linux__
 #include <sys/types.h>
 
+#include <condition_variable>
+#include <mutex>
 #include <string>
 
 #include <glog/logging.h>
@@ -38,7 +40,9 @@
 #include <stout/try.hpp>
 #include <stout/unreachable.hpp>
 
+using std::condition_variable;
 using std::map;
+using std::mutex;
 using std::string;
 using std::vector;
 
@@ -459,6 +463,188 @@ static int childMain(
 }
 
 
+struct CloneConfig
+{
+  char** argv;
+  char** environment;
+  string path;
+  InputFileDescriptors stdinfds;
+  OutputFileDescriptors stdoutfds;
+  OutputFileDescriptors stderrfds;
+  mutex* mut;
+  bool* ready;
+  condition_variable* notifier;
+  Watchdog watchdog;
+  std::vector<Subprocess::ChildHook> child_hooks;
+
+  ~CloneConfig() {
+    std::cout << "CloneConfig Destruction";
+    // As we are waiting on the condition_variable we know the parent has
+    // finished using those variables at this point.
+    delete mut;
+    delete ready;
+    delete notifier;
+
+    // Need to delete 'envp' if we had environment variables passed to
+    // us and we needed to allocate the space.
+    if (environment != os::raw::environment()) {
+      // We ignore the last 'envp' entry since it is NULL.
+      for (size_t index = 0; environment[index] != NULL; ++index) {
+        delete[] environment[index];
+      }
+
+      delete[] environment;
+    }
+  }
+};
+
+
+// Creates a seperate watchdog process to monitor the child process and
+// kill it in case the parent process dies.
+// Note: This function needs to be async signal safe. In fact,
+// all the library functions we used in this function are async
+// signal safe.
+static int watchdogSharedProcess()
+{
+#ifdef __linux__
+  // Send SIGTERM to the current process if the parent (i.e., the
+  // slave) exits.
+  // Note: This function should always succeed because we are passing
+  // in a valid signal.
+  prctl(PR_SET_PDEATHSIG, SIGTERM);
+
+  // Put the current process into a separate process group so that
+  // we can kill it and all its children easily.
+  if (setpgid(0, 0) != 0) {
+    LOG(ERROR) <<"Could not install Sigterm Handler in watchdogProcess";
+    // Exit without cleanup which could effect the parent process.
+    _exit(EXIT_FAILURE);
+  }
+
+  // Install a SIGTERM handler which will kill the current process
+  // group. Since we already setup the death signal above, the
+  // signal handler will be triggered when the parent (e.g., the
+  // slave) exits.
+  if (os::signals::install(SIGTERM, &signalHandler) != 0) {
+    LOG(ERROR) <<"Could not install Sigterm Handler in watchdogProcess";
+    // Exit without cleanup which could effect the parent process.
+    _exit(EXIT_FAILURE);
+  }
+
+  // TODO(joerg84): Use the optimized clone function here.
+  pid_t pid = fork();
+  if (pid == -1) {
+    // Exit without cleanup which could effect the parent process.
+    LOG(ERROR) <<"Failed to fork watchdogProcess";
+    _exit(EXIT_FAILURE);
+  } else if (pid == 0) {
+    // Child. This is the process that is going to exec the
+    // process if zero is returned.
+
+    // We setup death signal for the process as well in case
+    // someone, though unlikely, accidentally kill the parent of
+    // this process (the bookkeeping process).
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+
+    // NOTE: We don't need to clear the signal handler explicitly
+    // because the subsequent 'exec' will clear them.
+    return 0;
+  } else {
+    // Parent. This is the bookkeeping process which will wait for
+    // the child process to finish.
+
+    // Close the files to prevent interference on the communication
+    // between the slave and the child process.
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+
+    // Block until the child process finishes.
+    int status = 0;
+    if (waitpid(pid, &status, 0) == -1) {
+      LOG(ERROR) <<"Failed to wait for child in watchdogProcess";
+      // Exit without cleanup which could effect the parent process.
+      _exit(EXIT_FAILURE);
+    }
+
+    // Forward the exit status if the child process exits normally.
+    if (WIFEXITED(status)) {
+      _exit(WEXITSTATUS(status));
+    }
+
+    abort();
+    UNREACHABLE();
+  }
+#endif
+  // WatchDogProcess shared process should only be called on linux.
+  return 0;
+}
+
+
+// The main entry of the optimized child process running in the same address
+// space.
+static int childMainShared(void* conf) {
+  Owned<CloneConfig> config =
+    Owned<CloneConfig>(static_cast<CloneConfig*>(conf));
+    // TODO(joerg84): Add consistency checks.
+
+  // Close parent's end of the pipes.
+  if (config->stdinfds.write.isSome()) {
+    ::close(config->stdinfds.write.get());
+  }
+  if (config->stdoutfds.read.isSome()) {
+    ::close(config->stdoutfds.read.get());
+  }
+  if (config->stderrfds.read.isSome()) {
+    ::close(config->stderrfds.read.get());
+  }
+
+  // Redirect I/O for stdin/stdout/stderr.
+  while (::dup2(config->stdinfds.read, STDIN_FILENO) == -1 &&
+      errno == EINTR);
+  while (::dup2(config->stdoutfds.write, STDOUT_FILENO) == -1 &&
+      errno == EINTR);
+  while (::dup2(config->stderrfds.write, STDERR_FILENO) == -1 &&
+     errno == EINTR);
+
+  // Wait for parent process;
+  CHECK_NOTNULL(config->mut);
+  CHECK_NOTNULL(config->notifier);
+  CHECK_NOTNULL(config->ready);
+  std::unique_lock<mutex> lk(*(config->mut));
+  config->notifier->wait(lk, [&config]{return *(config->ready);});
+
+  // Run the child hooks.
+  foreach (const Subprocess::ChildHook& hook, config->child_hooks) {
+    Try<Nothing> callback = hook();
+
+    // If the callback failed, we should abort execution.
+    if (callback.isError()) {
+      LOG(ERROR)
+        << "Failed to execute Subprocess::ChildHook: " << callback.error();
+
+      // Exit without cleanup which could effect the parent process.
+      _exit(EXIT_FAILURE);
+    }
+  }
+
+  // If the process should die together with its parent we spawn an seperate
+  // watchdog process which kill the child in such case.
+  if (config->watchdog == MONITOR) {
+    watchdogSharedProcess();
+  }
+
+  os::execvpe(config->path.c_str(),
+              config->argv,
+              config->environment);
+
+  LOG(ERROR) <<"Failed to os::execvpe on path : " << os::strerror(errno);
+
+  // Exit without cleanup which could effect the parent process.
+  _exit(EXIT_FAILURE);
+}
+
+
 Try<Subprocess> subprocess(
     const string& path,
     vector<string> argv,
@@ -524,6 +710,141 @@ Try<Subprocess> subprocess(
     }
   }
 
+
+#ifdef __linux__
+  // TODO(joerg84): Make this the default mode and not just used if namespace
+  // flags are used.
+  if (namespaces.isSome()) {
+    LOG(INFO) << "Subprocess: Using optimized clone function";
+
+    // Setup signaling to child.
+    // NOTE: As we are in the same address space we don't have to use pipes for
+    // signaling in this case.
+    // NOTE: These variables are shared (and cleaned up) with the child.
+    bool* ready = new bool;
+    mutex* mut = new mutex;
+    condition_variable* notifier = new condition_variable;
+
+    // NOTE: The child is responsible for cleaning up all related storage.
+    struct CloneConfig* cloneConfig = new CloneConfig;
+    cloneConfig->ready = ready;
+    cloneConfig->mut = mut;
+    cloneConfig->notifier = notifier;
+
+    cloneConfig->stdinfds = stdinfds;
+    cloneConfig->stdoutfds = stdoutfds;
+    cloneConfig->stderrfds = stderrfds;
+
+    cloneConfig->path = path;
+
+    // The real arguments that will be passed to 'os::execvpe'. We need
+    // to construct them here before doing the clone as it might not be
+    // async signal safe to perform the memory allocation.
+    char** _argv = new char*[argv.size() + 1];
+    for (int i = 0; i < argv.size(); i++) {
+      _argv[i] = (char*) argv[i].c_str();
+    }
+    _argv[argv.size()] = NULL;
+    cloneConfig->argv = _argv;
+
+    // Like above, we need to construct the environment that we'll pass
+    // to 'os::execvpe' as it might not be async-safe to perform the
+    // memory allocations.
+    char** envp = os::raw::environment();
+
+    if (environment.isSome()) {
+      // NOTE: We add 1 to the size for a NULL terminator.
+      envp = new char*[environment.get().size() + 1];
+
+      size_t index = 0;
+      foreachpair (const string& key, const string& value, environment.get()) {
+        string entry = key + "=" + value;
+        envp[index] = new char[entry.size() + 1];
+        strncpy(envp[index], entry.c_str(), entry.size() + 1);
+        ++index;
+      }
+
+      envp[index] = NULL;
+    }
+    cloneConfig->environment = envp;
+
+    int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
+    cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
+    cloneFlags |= CLONE_VM; // Specify CLONE_VM in order to avoid a
+                            // copy-on-write view on the address space.
+
+    pid_t pid = os::clone_d(childMainShared, cloneConfig, cloneFlags);
+
+    // Run the parent hooks.
+    foreach (const Subprocess::Hook& hook, parent_hooks) {
+      Try<Nothing> callback = hook.parent_callback(pid);
+
+      // If the hook callback fails, we shouldn't proceed with the
+      // execution and hence the child process should be killed.
+      if (callback.isError()) {
+        LOG(WARNING)
+          << "Failed to execute Subprocess::Hook in parent for child '"
+          << pid << "': " << callback.error();
+
+        // Close the child-ends of the file descriptors that are created
+        // by this function.
+        os::close(stdinfds.read);
+        os::close(stdoutfds.write);
+        os::close(stderrfds.write);
+
+        // Ensure the child is killed.
+        ::kill(pid, SIGKILL);
+
+        return Error(
+            "Failed to execute Subprocess::Hook in parent for child '" +
+            stringify(pid) + "': " + callback.error());
+      }
+    }
+
+    // Signal child to continue.
+    {
+      std::lock_guard<std::mutex> lk(*mut);
+      *ready = true;
+    }
+    notifier->notify_one();
+
+    // Parent.
+    Subprocess process;
+    process.data->pid = pid;
+
+    // Close the child-ends of the file descriptors that are created
+    // by this function.
+    os::close(stdinfds.read);
+    os::close(stdoutfds.write);
+    os::close(stderrfds.write);
+
+    // For any pipes, store the parent side of the pipe so that
+    // the user can communicate with the subprocess.
+    process.data->in = stdinfds.write;
+    process.data->out = stdoutfds.read;
+    process.data->err = stderrfds.read;
+
+    // Rather than directly exposing the future from process::reap, we
+    // must use an explicit promise so that we can ensure we can receive
+    // the termination signal. Otherwise, the caller can discard the
+    // reap future, and we will not know when it is safe to close the
+    // file descriptors.
+    // Promise<Option<int>>* promise = new Promise<Option<int>>();
+    // process.data->status = promise->future();
+
+    // We need to bind a copy of this Subprocess into the onAny callback
+    // below to ensure that we don't close the file descriptors before
+    // the subprocess has terminated (i.e., because the caller doesn't
+    // keep a copy of this Subprocess around themselves).
+    // process::reap(process.data->pid)
+    //  .onAny(lambda::bind(internal::cleanup, lambda::_1, promise, process));
+
+    return process;
+  }
+#endif // __linux__
+  // If we are not on linux will continue using the default clone function
+  // and a copy-on-write address space.
+
   // The real arguments that will be passed to 'os::execvpe'. We need
   // to construct them here before doing the clone as it might not be
   // async signal safe to perform the memory allocation.
@@ -553,17 +874,6 @@ Try<Subprocess> subprocess(
     envp[index] = NULL;
   }
 
-  // Determine the function to spawn/clone the child process.
-  lambda::function<pid_t(const lambda::function<int()>&)> clone = defaultClone;
-
-#ifdef __linux__
-  // In case namespaces are specified, we need to generate a custom clone
-  // function.
-  if (namespaces.isSome()) {
-    clone = lambda::bind(&os::clone, lambda::_1, namespaces.get());
-  }
-#endif // __linux__
-
   // Currently we will block the child's execution of the new process
   // until all the `parent_hooks` (if any) have executed.
   int pipes[2];
@@ -576,7 +886,7 @@ Try<Subprocess> subprocess(
   }
 
   // Now, clone the child process.
-  pid_t pid = clone(lambda::bind(
+  pid_t pid = defaultClone(lambda::bind(
       &childMain,
       path,
       _argv,
@@ -669,6 +979,7 @@ Try<Subprocess> subprocess(
       return Error("Failed to synchronize child process");
     }
   }
+
 
   // Parent.
   Subprocess process;
