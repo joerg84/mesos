@@ -112,7 +112,6 @@ Try<pid_t> PosixLauncher::fork(
       err,
       flags,
       environment,
-      None(),
       parentHooks,
       {Subprocess::ChildHook::SETSID()});
 

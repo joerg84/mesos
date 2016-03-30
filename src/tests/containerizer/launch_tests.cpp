@@ -80,7 +80,10 @@ public:
         Subprocess::FD(STDERR_FILENO),
         launchFlags,
         None(),
-        lambda::bind(&os::clone, lambda::_1, CLONE_NEWNS | SIGCHLD));
+        Subprocess::Hook::None(),
+        Subprocess::ChildHook::None(),
+        NO_MONITOR,
+        CLONE_NEWNS | SIGCHLD);
 
     close(launchFlags.pipe_read.get());
     close(launchFlags.pipe_write.get());
