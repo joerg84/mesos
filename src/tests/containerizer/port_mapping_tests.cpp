@@ -373,7 +373,6 @@ protected:
         Subprocess::PATH("/dev/null"),
         Subprocess::PIPE(),
         Subprocess::FD(STDERR_FILENO),
-        NO_SETSID,
         statistics.flags);
 
     CHECK_SOME(s);

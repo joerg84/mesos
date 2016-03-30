@@ -179,7 +179,6 @@ private:
           Subprocess::PATH("/dev/null"),
           Subprocess::FD(STDERR_FILENO),
           Subprocess::FD(STDERR_FILENO),
-          process::NO_SETSID,
           environment);
     } else {
       // Use the exec variant.
@@ -202,7 +201,6 @@ private:
           Subprocess::PATH("/dev/null"),
           Subprocess::FD(STDERR_FILENO),
           Subprocess::FD(STDERR_FILENO),
-          process::NO_SETSID,
           None(),
           environment);
     }

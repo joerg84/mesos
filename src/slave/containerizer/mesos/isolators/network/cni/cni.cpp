@@ -43,7 +43,6 @@ using process::Future;
 using process::Owned;
 using process::Failure;
 using process::Subprocess;
-using process::NO_SETSID;
 using process::PID;
 
 using mesos::slave::ContainerConfig;
@@ -472,7 +471,6 @@ Future<Nothing> NetworkCniIsolatorProcess::attach(
       Subprocess::PATH(networkConfig.path),
       Subprocess::PIPE(),
       Subprocess::PATH("/dev/null"),
-      NO_SETSID,
       None(),
       environment);
 
