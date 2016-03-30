@@ -35,14 +35,7 @@
 
 namespace process {
 
-// Flag describing whether a new process should generate a new sid.
-enum Setsid
-{
-  SETSID,
-  NO_SETSID,
-};
-
-// Flag describing whether a new process should be monitored by a seperate
+// Flag describing whether a new process should be monitored by a separate
 // watch process and be killed in case the parent process dies.
 enum Watchdog {
   MONITOR,
@@ -62,6 +55,7 @@ class Subprocess
 public:
   // Forward declarations.
   struct Hook;
+  class ChildHook;
 
   /**
    * Describes how the I/O is redirected for stdin/stdout/stderr.
@@ -83,7 +77,7 @@ public:
      * descriptor if one is present.
      *
      * NOTE: We initialize `read` to -1 so that we do not close an
-     * arbitrary file descriptor,in case we encounter an error
+     * arbitrary file descriptor, in case we encounter an error
      * while starting a subprocess (closing -1 is always a no-op).
      */
     struct InputFileDescriptors
@@ -136,13 +130,12 @@ public:
         const Subprocess::IO& in,
         const Subprocess::IO& out,
         const Subprocess::IO& err,
-        const Setsid set_sid,
         const Option<flags::FlagsBase>& flags,
         const Option<std::map<std::string, std::string>>& environment,
         const Option<lambda::function<
             pid_t(const lambda::function<int()>&)>>& clone,
         const std::vector<Subprocess::Hook>& parent_hooks,
-        const Option<std::string>& working_directory,
+        const std::vector<Subprocess::ChildHook>& child_hooks,
         const Watchdog watchdog);
 
     IO(const lambda::function<Try<InputFileDescriptors>()>& _input,
@@ -176,13 +169,51 @@ public:
     Hook(const lambda::function<Try<Nothing>(pid_t)>& _parent_callback);
 
     /**
-     * The callback that must be sepcified for execution after the
+     * The callback that must be specified for execution after the
      * child has been cloned, but before it start executing the new
      * process. This provides access to the child pid after its
      * initialization to add tracking or modify execution state of
      * the child before it executes the new process.
      */
     const lambda::function<Try<Nothing>(pid_t)> parent_callback;
+
+    friend class Subprocess;
+  };
+
+  /**
+   * A ChildHook can be passed to a `subprocess` call. It provides a way to
+   * inject predefined behavior between the clone and exec calls in the
+   * child process.
+   * As such ChildHooks have to fulfill certain criteria (especially
+   * being async safe) the class does not offer a public constructor.
+   * Instead instances can be created via factory methods.
+   * NOTE: Returning an error from a childHook causes the child process to
+   * abort.
+   */
+  class ChildHook
+  {
+  public:
+    /**
+     * ChildHook for changing the working directory.
+     */
+    static ChildHook CHDIR(const std::string& working_directory);
+
+    /**
+     * ChildHook for generating a new session id.
+     */
+    static ChildHook SETSID();
+
+    /**
+     * Returns an empty list of ChildHooks.
+     */
+    static std::vector<ChildHook> None() { return std::vector<ChildHook>(); }
+
+    Try<Nothing> operator() () const { return child_setup(); }
+
+  private:
+    ChildHook(const lambda::function<Try<Nothing>()>& _child_setup);
+
+    const lambda::function<Try<Nothing>()> child_setup;
 
     friend class Subprocess;
   };
@@ -239,13 +270,12 @@ private:
       const Subprocess::IO& in,
       const Subprocess::IO& out,
       const Subprocess::IO& err,
-      const Setsid setsid,
       const Option<flags::FlagsBase>& flags,
       const Option<std::map<std::string, std::string>>& environment,
       const Option<lambda::function<
           pid_t(const lambda::function<int()>&)>>& clone,
       const std::vector<Subprocess::Hook>& parent_hooks,
-      const Option<std::string>& working_directory,
+      const std::vector<Subprocess::ChildHook>& child_hooks,
       const Watchdog watchdog);
 
   struct Data
@@ -286,8 +316,6 @@ private:
  * @param in Redirection specification for stdin.
  * @param out Redirection specification for stdout.
  * @param err Redirection specification for stderr.
- * @param set_sid Indicator whether the process should be placed in
- *     a new session after the 'parent_hooks' have been executed.
  * @param flags Flags to be stringified and appended to 'argv'.
  * @param environment Environment variables to use for the new
  *     subprocess or if None (the default) then the new subprocess
@@ -296,8 +324,8 @@ private:
  *     subprocess.
  * @param parent_hooks Hooks that will be executed in the parent
  *     before the child execs.
- * @param working_directory Directory in which the process should
- *     chdir before exec after the 'parent_hooks' have been executed.
+ * @param child_hooks Hooks that will be executed in the child
+ *     before the child execs but after parent_hooks have executed.
  * @param watchdog Indicator whether the new process should be monitored
  *     and killed if the parent process terminates.
  * @return The subprocess or an error if one occurred.
@@ -310,16 +338,15 @@ Try<Subprocess> subprocess(
     const Subprocess::IO& in = Subprocess::FD(STDIN_FILENO),
     const Subprocess::IO& out = Subprocess::FD(STDOUT_FILENO),
     const Subprocess::IO& err = Subprocess::FD(STDERR_FILENO),
-    const Setsid set_sid = NO_SETSID,
     const Option<flags::FlagsBase>& flags = None(),
     const Option<std::map<std::string, std::string>>& environment = None(),
     const Option<lambda::function<
         pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
       Subprocess::Hook::None(),
-    const Option<std::string>& working_directory = None(),
+    const std::vector<Subprocess::ChildHook>& child_hooks =
+      Subprocess::ChildHook::None(),
     const Watchdog watchdog = NO_MONITOR);
-
 
 /**
  * Overload of 'subprocess' for launching a shell command, i.e., 'sh
@@ -332,8 +359,6 @@ Try<Subprocess> subprocess(
  * @param in Redirection specification for stdin.
  * @param out Redirection specification for stdout.
  * @param err Redirection specification for stderr.
- * @param set_sid Indicator whether the process should be placed in
- *     a new session after the 'parent_hooks' have been executed.
  * @param environment Environment variables to use for the new
  *     subprocess or if None (the default) then the new subprocess
  *     will inherit the environment of the current process.
@@ -341,8 +366,8 @@ Try<Subprocess> subprocess(
  *     subprocess.
  * @param parent_hooks Hooks that will be executed in the parent
  *     before the child execs.
- * @param working_directory Directory in which the process should
- *     chdir before exec after the 'parent_hooks' have been executed.
+ * @param child_hooks Hooks that will be executed in the child
+ *     before the child execs but after parent_hooks have executed.
  * @param watchdog Indicator whether the new process should be monitored
  *     and killed if the parent process terminates.
  * @return The subprocess or an error if one occurred.
@@ -354,13 +379,13 @@ inline Try<Subprocess> subprocess(
     const Subprocess::IO& in = Subprocess::FD(STDIN_FILENO),
     const Subprocess::IO& out = Subprocess::FD(STDOUT_FILENO),
     const Subprocess::IO& err = Subprocess::FD(STDERR_FILENO),
-    const Setsid set_sid = NO_SETSID,
     const Option<std::map<std::string, std::string>>& environment = None(),
     const Option<lambda::function<
         pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
       Subprocess::Hook::None(),
-    const Option<std::string>& working_directory = None(),
+    const std::vector<Subprocess::ChildHook>& child_hooks =
+      Subprocess::ChildHook::None(),
     const Watchdog watchdog = NO_MONITOR)
 {
   std::vector<std::string> argv = {"sh", "-c", command};
@@ -371,12 +396,11 @@ inline Try<Subprocess> subprocess(
       in,
       out,
       err,
-      set_sid,
       None(),
       environment,
       clone,
       parent_hooks,
-      working_directory,
+      child_hooks,
       watchdog);
 }
 

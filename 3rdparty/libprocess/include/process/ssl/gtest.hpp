@@ -359,7 +359,6 @@ protected:
         process::Subprocess::PIPE(),
         process::Subprocess::PIPE(),
         process::Subprocess::FD(STDERR_FILENO),
-        process::NO_SETSID,
         None(),
         environment);
   }

@@ -52,6 +52,37 @@ Subprocess::Hook::Hook(
     const lambda::function<Try<Nothing>(pid_t)>& _parent_callback)
   : parent_callback(_parent_callback) {}
 
+Subprocess::ChildHook::ChildHook(
+    const lambda::function<Try<Nothing>()>& _child_setup)
+  : child_setup(_child_setup) {}
+
+Subprocess::ChildHook Subprocess::ChildHook::CHDIR(
+    const std::string& working_directory)
+{
+  return Subprocess::ChildHook([&working_directory]() -> Try<Nothing> {
+    // Put child into its own process session to prevent slave suicide
+    // on child process SIGKILL/SIGTERM.
+    if (::chdir(working_directory.c_str()) == -1) {
+      return Error("Could not chdir");
+    }
+
+    return Nothing();
+  });
+}
+
+Subprocess::ChildHook Subprocess::ChildHook::SETSID()
+{
+  return Subprocess::ChildHook([]() -> Try<Nothing> {
+    // Put child into its own process session to prevent slave suicide
+    // on child process SIGKILL/SIGTERM.
+    if (::setsid() == -1) {
+      return Error("Could not setdid");
+    }
+
+    return Nothing();
+  });
+}
+
 namespace internal {
 
 // See the comment below as to why subprocess is passed to cleanup.
@@ -332,13 +363,12 @@ static int childMain(
     const string& path,
     char** argv,
     char** envp,
-    const Setsid set_sid,
     const InputFileDescriptors& stdinfds,
     const OutputFileDescriptors& stdoutfds,
     const OutputFileDescriptors& stderrfds,
     bool blocking,
     int pipes[2],
-    const Option<string>& working_directory,
+    const std::vector<Subprocess::ChildHook>& child_hooks,
     const Watchdog watchdog)
 {
   // Close parent's end of the pipes.
@@ -400,21 +430,16 @@ static int childMain(
     ::close(pipes[0]);
   }
 
-  // Move to a different session (and new process group) so we're
-  // independent from the caller's session (otherwise children will
-  // receive SIGHUP if the slave exits).
-  if (set_sid == SETSID) {
-    // POSIX guarantees a forked child's pid does not match any existing
-    // process group id so only a single `setsid()` is required and the
-    // session id will be the pid.
-    if (::setsid() == -1) {
-      ABORT("Failed to put child in a new session");
-    }
-  }
+  // Run the child hooks.
+  foreach (const Subprocess::ChildHook& hook, child_hooks) {
+    Try<Nothing> callback = hook();
 
-  if (working_directory.isSome()) {
-    if (::chdir(working_directory->c_str()) == -1) {
-      ABORT("Failed to change directory");
+    // If the callback failed, we should abort execution.
+    if (callback.isError()) {
+      LOG(WARNING)
+        << "Failed to execute Subprocess::ChildHook: " << callback.error();
+
+      ABORT("Failed to execute Subprocess::ChildHook: " + callback.error());
     }
   }
 
@@ -440,13 +465,12 @@ Try<Subprocess> subprocess(
     const Subprocess::IO& in,
     const Subprocess::IO& out,
     const Subprocess::IO& err,
-    const Setsid set_sid,
     const Option<flags::FlagsBase>& flags,
     const Option<map<string, string>>& environment,
     const Option<lambda::function<
         pid_t(const lambda::function<int()>&)>>& _clone,
     const vector<Subprocess::Hook>& parent_hooks,
-    const Option<string>& working_directory,
+    const std::vector<Subprocess::ChildHook>& child_hooks,
     const Watchdog watchdog)
 {
   // File descriptors for redirecting stdin/stdout/stderr.
@@ -552,13 +576,12 @@ Try<Subprocess> subprocess(
       path,
       _argv,
       envp,
-      set_sid,
       stdinfds,
       stdoutfds,
       stderrfds,
       blocking,
       pipes,
-      working_directory,
+      child_hooks,
       watchdog));
 
   delete[] _argv;
