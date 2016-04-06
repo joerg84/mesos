@@ -2895,6 +2895,7 @@ ProcessBase* ProcessManager::dequeue()
   synchronized (runq_mutex) {
     if (!runq.empty()) {
       process = runq.front();
+      std::cout << std::endl << std::endl << process;
       runq.pop_front();
       // Increment the running count of processes in order to support
       // the Clock::settle() operation (this must be done atomically

@@ -742,7 +742,9 @@ Try<Subprocess> subprocess(
     // async signal safe to perform the memory allocation.
     char** _argv = new char*[argv.size() + 1];
     for (int i = 0; i < argv.size(); i++) {
-      _argv[i] = (char*) argv[i].c_str();
+      _argv[i] = new char[argv[i].size()];
+      memcpy(_argv[i], argv[i].c_str(), argv[i].size());
+      _argv[i][argv[i].size()] = '\0';
     }
     _argv[argv.size()] = NULL;
     cloneConfig->argv = _argv;
@@ -812,17 +814,17 @@ Try<Subprocess> subprocess(
     Subprocess process;
     process.data->pid = pid;
 
-    // Close the child-ends of the file descriptors that are created
-    // by this function.
-    os::close(stdinfds.read);
-    os::close(stdoutfds.write);
-    os::close(stderrfds.write);
+    // // Close the child-ends of the file descriptors that are created
+    // // by this function.
+    // os::close(stdinfds.read);
+    // os::close(stdoutfds.write);
+    // os::close(stderrfds.write);
 
-    // For any pipes, store the parent side of the pipe so that
-    // the user can communicate with the subprocess.
-    process.data->in = stdinfds.write;
-    process.data->out = stdoutfds.read;
-    process.data->err = stderrfds.read;
+    // // For any pipes, store the parent side of the pipe so that
+    // // the user can communicate with the subprocess.
+    // process.data->in = stdinfds.write;
+    // process.data->out = stdoutfds.read;
+    // process.data->err = stderrfds.read;
 
     // Rather than directly exposing the future from process::reap, we
     // must use an explicit promise so that we can ensure we can receive
@@ -837,7 +839,7 @@ Try<Subprocess> subprocess(
     // the subprocess has terminated (i.e., because the caller doesn't
     // keep a copy of this Subprocess around themselves).
     // process::reap(process.data->pid)
-    //  .onAny(lambda::bind(internal::cleanup, lambda::_1, promise, process));
+    //   .onAny(lambda::bind(internal::cleanup, lambda::_1, promise, process));
 
     return process;
   }
