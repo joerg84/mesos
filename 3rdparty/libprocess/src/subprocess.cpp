@@ -736,6 +736,7 @@ Try<Subprocess> subprocess(
     cloneConfig->stderrfds = stderrfds;
 
     cloneConfig->path = path;
+    cloneConfig->watchdog = watchdog;
 
     // The real arguments that will be passed to 'os::execvpe'. We need
     // to construct them here before doing the clone as it might not be
@@ -743,8 +744,7 @@ Try<Subprocess> subprocess(
     char** _argv = new char*[argv.size() + 1];
     for (int i = 0; i < argv.size(); i++) {
       _argv[i] = new char[argv[i].size()];
-      memcpy(_argv[i], argv[i].c_str(), argv[i].size());
-      _argv[i][argv[i].size()] = '\0';
+      strncpy(_argv[i], argv[i].c_str(), argv[i].size() + 1);
     }
     _argv[argv.size()] = NULL;
     cloneConfig->argv = _argv;
@@ -772,6 +772,7 @@ Try<Subprocess> subprocess(
 
     int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
     cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
+    cloneFlags |= CLONE_FILES;
     cloneFlags |= CLONE_VM; // Specify CLONE_VM in order to avoid a
                             // copy-on-write view on the address space.
 
