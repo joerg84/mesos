@@ -132,8 +132,6 @@ public:
         const Subprocess::IO& err,
         const Option<flags::FlagsBase>& flags,
         const Option<std::map<std::string, std::string>>& environment,
-        const Option<lambda::function<
-            pid_t(const lambda::function<int()>&)>>& clone,
         const std::vector<Subprocess::Hook>& parent_hooks,
         const std::vector<Subprocess::ChildHook>& child_hooks,
         const Watchdog watchdog,
@@ -271,8 +269,6 @@ private:
       const Subprocess::IO& err,
       const Option<flags::FlagsBase>& flags,
       const Option<std::map<std::string, std::string>>& environment,
-      const Option<lambda::function<
-          pid_t(const lambda::function<int()>&)>>& clone,
       const std::vector<Subprocess::Hook>& parent_hooks,
       const std::vector<Subprocess::ChildHook>& child_hooks,
       const Watchdog watchdog,
@@ -320,8 +316,6 @@ private:
  * @param environment Environment variables to use for the new
  *     subprocess or if None (the default) then the new subprocess
  *     will inherit the environment of the current process.
- * @param clone Function to be invoked in order to fork/clone the
- *     subprocess.
  * @param parent_hooks Hooks that will be executed in the parent
  *     before the child execs.
  * @param child_hooks Hooks that will be executed in the child
@@ -341,8 +335,6 @@ Try<Subprocess> subprocess(
     const Subprocess::IO& err = Subprocess::FD(STDERR_FILENO),
     const Option<flags::FlagsBase>& flags = None(),
     const Option<std::map<std::string, std::string>>& environment = None(),
-    const Option<lambda::function<
-        pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
       Subprocess::Hook::None(),
     const std::vector<Subprocess::ChildHook>& child_hooks =
@@ -365,8 +357,6 @@ Try<Subprocess> subprocess(
  * @param environment Environment variables to use for the new
  *     subprocess or if None (the default) then the new subprocess
  *     will inherit the environment of the current process.
- * @param clone Function to be invoked in order to fork/clone the
- *     subprocess.
  * @param parent_hooks Hooks that will be executed in the parent
  *     before the child execs.
  * @param child_hooks Hooks that will be executed in the child
@@ -384,8 +374,6 @@ inline Try<Subprocess> subprocess(
     const Subprocess::IO& out = Subprocess::FD(STDOUT_FILENO),
     const Subprocess::IO& err = Subprocess::FD(STDERR_FILENO),
     const Option<std::map<std::string, std::string>>& environment = None(),
-    const Option<lambda::function<
-        pid_t(const lambda::function<int()>&)>>& clone = None(),
     const std::vector<Subprocess::Hook>& parent_hooks =
       Subprocess::Hook::None(),
     const std::vector<Subprocess::ChildHook>& child_hooks =
@@ -403,7 +391,6 @@ inline Try<Subprocess> subprocess(
       err,
       None(),
       environment,
-      clone,
       parent_hooks,
       child_hooks,
       watchdog,

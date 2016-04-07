@@ -469,8 +469,6 @@ Try<Subprocess> subprocess(
     const Subprocess::IO& err,
     const Option<flags::FlagsBase>& flags,
     const Option<map<string, string>>& environment,
-    const Option<lambda::function<
-        pid_t(const lambda::function<int()>&)>>& _clone,
     const vector<Subprocess::Hook>& parent_hooks,
     const std::vector<Subprocess::ChildHook>& child_hooks,
     const Watchdog watchdog,
@@ -557,10 +555,16 @@ Try<Subprocess> subprocess(
     envp[index] = NULL;
   }
 
-  // Determine the function to clone the child process. If the user
-  // does not specify the clone function, we will use the default.
-  lambda::function<pid_t(const lambda::function<int()>&)> clone =
-    (_clone.isSome() ? _clone.get() : defaultClone);
+  // Determine the function to spawn/clone the child process.
+  lambda::function<pid_t(const lambda::function<int()>&)> clone = defaultClone;
+
+#ifdef __linux__
+  // In case cloneFlags are specified, we need to generate a custom clone
+  // function.
+  if (clone_flags.isSome()) {
+    clone = lambda::bind(&os::clone, lambda::_1, clone_flags.get());
+  }
+#endif // __linux__
 
   // Currently we will block the child's execution of the new process
   // until all the `parent_hooks` (if any) have executed.
