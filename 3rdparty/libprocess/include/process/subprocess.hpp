@@ -136,7 +136,8 @@ public:
             pid_t(const lambda::function<int()>&)>>& clone,
         const std::vector<Subprocess::Hook>& parent_hooks,
         const std::vector<Subprocess::ChildHook>& child_hooks,
-        const Watchdog watchdog);
+        const Watchdog watchdog,
+        const Option<int>& clone_flags);
 
     IO(const lambda::function<Try<InputFileDescriptors>()>& _input,
        const lambda::function<Try<OutputFileDescriptors>()>& _output)
@@ -274,7 +275,8 @@ private:
           pid_t(const lambda::function<int()>&)>>& clone,
       const std::vector<Subprocess::Hook>& parent_hooks,
       const std::vector<Subprocess::ChildHook>& child_hooks,
-      const Watchdog watchdog);
+      const Watchdog watchdog,
+      const Option<int>& clone_flags);
 
   struct Data
   {
@@ -326,6 +328,7 @@ private:
  *     before the child execs but after parent_hooks have executed.
  * @param watchdog Indicator whether the new process should be monitored
  *     and killed if the parent process terminates.
+ * @param clone_flags Flags to be passed to clone.
  * @return The subprocess or an error if one occurred.
  */
 // TODO(jmlvanre): Consider removing default argument for
@@ -344,7 +347,8 @@ Try<Subprocess> subprocess(
       Subprocess::Hook::None(),
     const std::vector<Subprocess::ChildHook>& child_hooks =
       Subprocess::ChildHook::None(),
-    const Watchdog watchdog = NO_MONITOR);
+    const Watchdog watchdog = NO_MONITOR,
+    const Option<int>& clone_flags = None());
 
 
 /**
@@ -369,6 +373,7 @@ Try<Subprocess> subprocess(
  *     before the child execs but after parent_hooks have executed.
  * @param watchdog Indicator whether the new process should be monitored
  *     and killed if the parent process terminates.
+ * @param clone_flags Flags to be passed to clone.
  * @return The subprocess or an error if one occurred.
  */
 // TODO(jmlvanre): Consider removing default argument for
@@ -385,7 +390,8 @@ inline Try<Subprocess> subprocess(
       Subprocess::Hook::None(),
     const std::vector<Subprocess::ChildHook>& child_hooks =
       Subprocess::ChildHook::None(),
-    const Watchdog watchdog = NO_MONITOR)
+    const Watchdog watchdog = NO_MONITOR,
+    const Option<int>& clone_flags = None())
 {
   std::vector<std::string> argv = {"sh", "-c", command};
 
@@ -400,7 +406,8 @@ inline Try<Subprocess> subprocess(
       clone,
       parent_hooks,
       child_hooks,
-      watchdog);
+      watchdog,
+      clone_flags);
 }
 
 } // namespace process {

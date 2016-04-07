@@ -473,7 +473,8 @@ Try<Subprocess> subprocess(
         pid_t(const lambda::function<int()>&)>>& _clone,
     const vector<Subprocess::Hook>& parent_hooks,
     const std::vector<Subprocess::ChildHook>& child_hooks,
-    const Watchdog watchdog)
+    const Watchdog watchdog,
+    const Option<int>& clone_flags)
 {
   // File descriptors for redirecting stdin/stdout/stderr.
   // These file descriptors are used for different purposes depending
