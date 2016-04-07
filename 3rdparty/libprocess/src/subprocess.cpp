@@ -588,51 +588,51 @@ static int childMainShared(void* conf) {
     Owned<CloneConfig>(static_cast<CloneConfig*>(conf));
     // TODO(joerg84): Add consistency checks.
 
-  // Close parent's end of the pipes.
-  if (config->stdinfds.write.isSome()) {
-    ::close(config->stdinfds.write.get());
-  }
-  if (config->stdoutfds.read.isSome()) {
-    ::close(config->stdoutfds.read.get());
-  }
-  if (config->stderrfds.read.isSome()) {
-    ::close(config->stderrfds.read.get());
-  }
+  // // Close parent's end of the pipes.
+  // if (config->stdinfds.write.isSome()) {
+  //   ::close(config->stdinfds.write.get());
+  // }
+  // if (config->stdoutfds.read.isSome()) {
+  //   ::close(config->stdoutfds.read.get());
+  // }
+  // if (config->stderrfds.read.isSome()) {
+  //   ::close(config->stderrfds.read.get());
+  // }
 
-  // Redirect I/O for stdin/stdout/stderr.
-  while (::dup2(config->stdinfds.read, STDIN_FILENO) == -1 &&
-      errno == EINTR);
-  while (::dup2(config->stdoutfds.write, STDOUT_FILENO) == -1 &&
-      errno == EINTR);
-  while (::dup2(config->stderrfds.write, STDERR_FILENO) == -1 &&
-     errno == EINTR);
+  // // Redirect I/O for stdin/stdout/stderr.
+  // while (::dup2(config->stdinfds.read, STDIN_FILENO) == -1 &&
+  //     errno == EINTR);
+  // while (::dup2(config->stdoutfds.write, STDOUT_FILENO) == -1 &&
+  //     errno == EINTR);
+  // while (::dup2(config->stderrfds.write, STDERR_FILENO) == -1 &&
+  //    errno == EINTR);
 
-  // Wait for parent process;
-  CHECK_NOTNULL(config->mut);
-  CHECK_NOTNULL(config->notifier);
-  CHECK_NOTNULL(config->ready);
-  std::unique_lock<mutex> lk(*(config->mut));
-  config->notifier->wait(lk, [&config]{return *(config->ready);});
+  // // Wait for parent process;
+  // CHECK_NOTNULL(config->mut);
+  // CHECK_NOTNULL(config->notifier);
+  // CHECK_NOTNULL(config->ready);
+  // std::unique_lock<mutex> lk(*(config->mut));
+  // config->notifier->wait(lk, [&config]{return *(config->ready);});
 
-  // Run the child hooks.
-  foreach (const Subprocess::ChildHook& hook, config->child_hooks) {
-    Try<Nothing> callback = hook();
+  // // Run the child hooks.
+  // foreach (const Subprocess::ChildHook& hook, config->child_hooks) {
+  //   Try<Nothing> callback = hook();
 
-    // If the callback failed, we should abort execution.
-    if (callback.isError()) {
-      LOG(ERROR)
-        << "Failed to execute Subprocess::ChildHook: " << callback.error();
+  //   // If the callback failed, we should abort execution.
+  //   if (callback.isError()) {
+  //     LOG(ERROR)
+  //       << "Failed to execute Subprocess::ChildHook: " << callback.error();
 
-      // Exit without cleanup which could effect the parent process.
-      _exit(EXIT_FAILURE);
-    }
-  }
+  //     // Exit without cleanup which could effect the parent process.
+  //     _exit(EXIT_FAILURE);
+  //   }
+  // }
 
-  // If the process should die together with its parent we spawn an seperate
-  // watchdog process which kill the child in such case.
-  if (config->watchdog == MONITOR) {
-    watchdogSharedProcess();
-  }
+  // // If the process should die together with its parent we spawn an seperate
+  // // watchdog process which kill the child in such case.
+  // if (config->watchdog == MONITOR) {
+  //   watchdogSharedProcess();
+  // }
 
   os::execvpe(config->path.c_str(),
               config->argv,
@@ -772,7 +772,7 @@ Try<Subprocess> subprocess(
 
     int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
     cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
-    cloneFlags |= CLONE_SETTLS;
+    // cloneFlags |= CLONE_SETTLS;
     cloneFlags |= CLONE_VM; // Specify CLONE_VM in order to avoid a
                             // copy-on-write view on the address space.
 
