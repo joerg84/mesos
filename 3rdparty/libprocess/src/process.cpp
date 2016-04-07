@@ -379,7 +379,8 @@ private:
   map<int, HttpProxy*> proxies;
 
   // Protects instance variables.
-  std::recursive_mutex mutex;
+  // std::recursive_mutex mutex;
+  std::mutex mutex;
 };
 
 
