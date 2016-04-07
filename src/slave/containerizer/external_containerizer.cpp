@@ -1105,7 +1105,6 @@ Try<Subprocess> ExternalContainerizerProcess::invoke(
       Subprocess::PIPE(),
       Subprocess::PIPE(),
       environment,
-      None(),
       Subprocess::Hook::None(),
       child_hooks);
 

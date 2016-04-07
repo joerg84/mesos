@@ -1226,7 +1226,6 @@ Future<pid_t> DockerContainerizerProcess::launchExecutorProcess(
         subprocessInfo.err,
         dockerFlags(flags, container->name(), container->directory),
         environment,
-        None(),
         parentHooks,
         {Subprocess::ChildHook::SETSID(),
          Subprocess::ChildHook::CHDIR(container->directory)});

@@ -132,7 +132,6 @@ private:
         Subprocess::PIPE(),
         None(),
         None(),
-        None(),
         Subprocess::Hook::None(),
         Subprocess::ChildHook::None(),
         MONITOR);

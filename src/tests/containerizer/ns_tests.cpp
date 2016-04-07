@@ -89,7 +89,10 @@ TEST(NsTest, ROOT_setns)
       Subprocess::FD(STDERR_FILENO),
       None(),
       None(),
-      lambda::bind(&os::clone, lambda::_1, flags | SIGCHLD));
+      Subprocess::Hook::None(),
+      Subprocess::ChildHook::None(),
+      NO_MONITOR,
+      flags | SIGCHLD);
 
   // Continue in parent.
   ASSERT_SOME(s);

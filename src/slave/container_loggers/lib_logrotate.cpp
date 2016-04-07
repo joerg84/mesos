@@ -142,7 +142,6 @@ public:
         Subprocess::FD(STDERR_FILENO),
         outFlags,
         environment,
-        None(),
         parentHooks);
 
     if (outProcess.isError()) {
@@ -188,7 +187,6 @@ public:
         Subprocess::FD(STDERR_FILENO),
         errFlags,
         environment,
-        None(),
         parentHooks);
 
     if (errProcess.isError()) {
