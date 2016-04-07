@@ -573,7 +573,6 @@ TEST_F(SubprocessTest, Flags)
       Subprocess::FD(STDIN_FILENO),
       Subprocess::PATH(out),
       Subprocess::FD(STDERR_FILENO),
-      process::NO_SETSID,
       flags);
 
   ASSERT_SOME(s);
@@ -638,7 +637,6 @@ TEST_F(SubprocessTest, Environment)
       Subprocess::FD(STDIN_FILENO),
       Subprocess::PIPE(),
       Subprocess::FD(STDERR_FILENO),
-      process::NO_SETSID,
       environment);
 
   ASSERT_SOME(s);
@@ -670,7 +668,6 @@ TEST_F(SubprocessTest, Environment)
       Subprocess::FD(STDIN_FILENO),
       Subprocess::PIPE(),
       Subprocess::FD(STDERR_FILENO),
-      process::NO_SETSID,
       environment);
 
   ASSERT_SOME(s);
@@ -705,7 +702,6 @@ TEST_F(SubprocessTest, EnvironmentWithSpaces)
       Subprocess::FD(STDIN_FILENO),
       Subprocess::PIPE(),
       Subprocess::FD(STDERR_FILENO),
-      process::NO_SETSID,
       environment);
 
   ASSERT_SOME(s);
@@ -740,7 +736,6 @@ TEST_F(SubprocessTest, EnvironmentWithSpacesAndQuotes)
       Subprocess::FD(STDIN_FILENO),
       Subprocess::PIPE(),
       Subprocess::FD(STDERR_FILENO),
-      process::NO_SETSID,
       environment);
 
   ASSERT_SOME(s);
@@ -778,7 +773,6 @@ TEST_F(SubprocessTest, EnvironmentOverride)
       Subprocess::FD(STDIN_FILENO),
       Subprocess::PIPE(),
       Subprocess::FD(STDERR_FILENO),
-      process::NO_SETSID,
       environment);
 
   ASSERT_SOME(s);
