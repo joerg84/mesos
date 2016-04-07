@@ -431,7 +431,6 @@ TEST_F(SlaveTest, CommandExecutorWithOverride)
         Subprocess::PIPE(),
         Subprocess::PIPE(),
         Subprocess::PIPE(),
-        NO_SETSID,
         environment);
 
   ASSERT_SOME(executor);

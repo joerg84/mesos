@@ -495,12 +495,11 @@ private:
         Subprocess::PATH("/dev/null"),
         Subprocess::PIPE(),
         Subprocess::PIPE(),
-        process::NO_SETSID,
         None(),
         None(),
         None(),
         Subprocess::Hook::None(),
-        None(),
+        Subprocess::ChildHook::None(),
         process::MONITOR);
 
     if (s.isError()) {

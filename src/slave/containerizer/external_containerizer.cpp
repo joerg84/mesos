@@ -58,6 +58,8 @@ using std::vector;
 
 using namespace process;
 
+using process::Subprocess;
+
 namespace mesos {
 namespace internal {
 namespace slave {
@@ -1085,8 +1087,16 @@ Try<Subprocess> ExternalContainerizerProcess::invoke(
     }
   }
 
-  // Fork exec of external process. Run a chdir and a setsid within
-  // the child-context.
+  // Create Hooks for setsid and chdir within the child-context.
+  std::vector<Subprocess::ChildHook> child_hooks{
+      Subprocess::ChildHook::SETSID()};
+
+  if (sandbox.isSome()) {
+    child_hooks.emplace_back(Subprocess::ChildHook::CHDIR(sandbox->directory));
+  }
+
+  // Fork exec of external process.
+  //
   // TODO(tillt): Consider having the kernel notify us when our parent
   // process dies e.g. by invoking prctl(PR_SET_PDEATHSIG, ..) on linux.
   Try<Subprocess> external = process::subprocess(
@@ -1094,11 +1104,10 @@ Try<Subprocess> ExternalContainerizerProcess::invoke(
       Subprocess::PIPE(),
       Subprocess::PIPE(),
       Subprocess::PIPE(),
-      process::SETSID,
       environment,
       None(),
       Subprocess::Hook::None(),
-      sandbox.isSome() ? Option<string>::some(sandbox->directory) : None());
+      child_hooks);
 
   if (external.isError()) {
     return Error("Failed to execute external containerizer: " +

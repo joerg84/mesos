@@ -1224,12 +1224,12 @@ Future<pid_t> DockerContainerizerProcess::launchExecutorProcess(
         Subprocess::PIPE(),
         subprocessInfo.out,
         subprocessInfo.err,
-        SETSID,
         dockerFlags(flags, container->name(), container->directory),
         environment,
         None(),
         parentHooks,
-        container->directory);
+        {Subprocess::ChildHook::SETSID(),
+         Subprocess::ChildHook::CHDIR(container->directory)});
 
     if (s.isError()) {
       return Failure("Failed to fork executor: " + s.error());

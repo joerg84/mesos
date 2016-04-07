@@ -3079,7 +3079,6 @@ Future<Nothing> PortMappingIsolatorProcess::update(
       Subprocess::PATH("/dev/null"),
       Subprocess::FD(STDOUT_FILENO),
       Subprocess::FD(STDERR_FILENO),
-      NO_SETSID,
       update.flags);
 
   if (s.isError()) {
@@ -3206,7 +3205,6 @@ Future<ResourceStatistics> PortMappingIsolatorProcess::usage(
       Subprocess::PATH("/dev/null"),
       Subprocess::PIPE(),
       Subprocess::FD(STDERR_FILENO),
-      NO_SETSID,
       statistics.flags);
 
   if (s.isError()) {
