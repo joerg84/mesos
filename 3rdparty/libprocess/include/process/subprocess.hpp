@@ -280,9 +280,9 @@ private:
   {
     ~Data()
     {
-      if (in.isSome()) { os::close(in.get()); }
-      if (out.isSome()) { os::close(out.get()); }
-      if (err.isSome()) { os::close(err.get()); }
+    //  if (in.isSome()) { os::close(in.get()); }
+    //  if (out.isSome()) { os::close(out.get()); }
+    //  if (err.isSome()) { os::close(err.get()); }
     }
 
     pid_t pid;
