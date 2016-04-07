@@ -772,7 +772,7 @@ Try<Subprocess> subprocess(
 
     int cloneFlags = namespaces.isSome() ? namespaces.get() : 0;
     cloneFlags |= SIGCHLD; // Specify SIGCHLD as child termination signal.
-    cloneFlags |= CLONE_FILES;
+    cloneFlags |= CLONE_SETTLS;
     cloneFlags |= CLONE_VM; // Specify CLONE_VM in order to avoid a
                             // copy-on-write view on the address space.
 
