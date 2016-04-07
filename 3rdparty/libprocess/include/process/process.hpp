@@ -365,7 +365,8 @@ private:
 
   // Mutex protecting internals.
   // TODO(benh): Consider replacing with a spinlock, on multi-core systems.
-  std::recursive_mutex mutex;
+  // std::recursive_mutex mutex;
+  std::mutex mutex;
 
   // Enqueue the specified message, request, or function call.
   void enqueue(Event* event, bool inject = false);

@@ -433,14 +433,16 @@ private:
 
   // Map of all local spawned and running processes.
   map<string, ProcessBase*> processes;
-  std::recursive_mutex processes_mutex;
+  // std::recursive_mutex processes_mutex;
+  std::mutex processes_mutex;
 
   // Gates for waiting threads (protected by processes_mutex).
   map<ProcessBase*, Gate*> gates;
 
   // Queue of runnable processes (implemented using list).
   list<ProcessBase*> runq;
-  std::recursive_mutex runq_mutex;
+  // std::recursive_mutex runq_mutex;
+  std::mutex runq_mutex;
 
   // Number of running processes, to support Clock::settle operation.
   std::atomic_long running;
@@ -453,7 +455,8 @@ private:
 
   // List of rules applied to all incoming HTTP requests.
   vector<Owned<firewall::FirewallRule>> firewallRules;
-  std::recursive_mutex firewall_mutex;
+  // std::recursive_mutex firewall_mutex;
+  std::mutex firewall_mutex;
 };
 
 
