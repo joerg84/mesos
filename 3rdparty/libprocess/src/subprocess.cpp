@@ -23,6 +23,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <string>
+#include <thread>
 
 #include <glog/logging.h>
 
@@ -584,64 +585,69 @@ static int watchdogSharedProcess()
 // The main entry of the optimized child process running in the same address
 // space.
 static int childMainShared(void* conf) {
-  Owned<CloneConfig> config =
-    Owned<CloneConfig>(static_cast<CloneConfig*>(conf));
-    // TODO(joerg84): Add consistency checks.
+  auto childLambda = [](void * conf) {
+    Owned<CloneConfig> config =
+      Owned<CloneConfig>(static_cast<CloneConfig*>(conf));
+      // TODO(joerg84): Add consistency checks.
 
-  // Close parent's end of the pipes.
-  if (config->stdinfds.write.isSome()) {
-    ::close(config->stdinfds.write.get());
-  }
-  if (config->stdoutfds.read.isSome()) {
-    ::close(config->stdoutfds.read.get());
-  }
-  if (config->stderrfds.read.isSome()) {
-    ::close(config->stderrfds.read.get());
-  }
-
-  // Redirect I/O for stdin/stdout/stderr.
-  while (::dup2(config->stdinfds.read, STDIN_FILENO) == -1 &&
-      errno == EINTR);
-  while (::dup2(config->stdoutfds.write, STDOUT_FILENO) == -1 &&
-      errno == EINTR);
-  while (::dup2(config->stderrfds.write, STDERR_FILENO) == -1 &&
-     errno == EINTR);
-
-  // Wait for parent process;
-  CHECK_NOTNULL(config->mut);
-  CHECK_NOTNULL(config->notifier);
-  CHECK_NOTNULL(config->ready);
-  std::unique_lock<mutex> lk(*(config->mut));
-  config->notifier->wait(lk, [&config]{return *(config->ready);});
-
-  // Run the child hooks.
-  foreach (const Subprocess::ChildHook& hook, config->child_hooks) {
-    Try<Nothing> callback = hook();
-
-    // If the callback failed, we should abort execution.
-    if (callback.isError()) {
-      LOG(ERROR)
-        << "Failed to execute Subprocess::ChildHook: " << callback.error();
-
-      // Exit without cleanup which could effect the parent process.
-      _exit(EXIT_FAILURE);
+    // Close parent's end of the pipes.
+    if (config->stdinfds.write.isSome()) {
+      ::close(config->stdinfds.write.get());
     }
-  }
+    if (config->stdoutfds.read.isSome()) {
+      ::close(config->stdoutfds.read.get());
+    }
+    if (config->stderrfds.read.isSome()) {
+      ::close(config->stderrfds.read.get());
+    }
 
-  // If the process should die together with its parent we spawn an seperate
-  // watchdog process which kill the child in such case.
-  if (config->watchdog == MONITOR) {
-    watchdogSharedProcess();
-  }
+    // Redirect I/O for stdin/stdout/stderr.
+    while (::dup2(config->stdinfds.read, STDIN_FILENO) == -1 &&
+        errno == EINTR);
+    while (::dup2(config->stdoutfds.write, STDOUT_FILENO) == -1 &&
+        errno == EINTR);
+    while (::dup2(config->stderrfds.write, STDERR_FILENO) == -1 &&
+       errno == EINTR);
 
-  os::execvpe(config->path.c_str(),
-              config->argv,
-              config->environment);
+    // Wait for parent process;
+    CHECK_NOTNULL(config->mut);
+    CHECK_NOTNULL(config->notifier);
+    CHECK_NOTNULL(config->ready);
+    std::unique_lock<mutex> lk(*(config->mut));
+    config->notifier->wait(lk, [&config]{return *(config->ready);});
 
-  LOG(ERROR) <<"Failed to os::execvpe on path : " << os::strerror(errno);
+    // Run the child hooks.
+    foreach (const Subprocess::ChildHook& hook, config->child_hooks) {
+      Try<Nothing> callback = hook();
 
-  // Exit without cleanup which could effect the parent process.
-  _exit(EXIT_FAILURE);
+      // If the callback failed, we should abort execution.
+      if (callback.isError()) {
+        LOG(ERROR)
+          << "Failed to execute Subprocess::ChildHook: " << callback.error();
+
+        // Exit without cleanup which could effect the parent process.
+        _exit(EXIT_FAILURE);
+      }
+    }
+
+    // If the process should die together with its parent we spawn an seperate
+    // watchdog process which kill the child in such case.
+    if (config->watchdog == MONITOR) {
+      watchdogSharedProcess();
+    }
+
+    os::execvpe(config->path.c_str(),
+                config->argv,
+                config->environment);
+
+    LOG(ERROR) <<"Failed to os::execvpe on path : " << os::strerror(errno);
+
+    // Exit without cleanup which could effect the parent process.
+    _exit(EXIT_FAILURE);
+  };
+
+  std::thread childThread(childLambda, conf);
+  childThread.join();
 }
 
 
