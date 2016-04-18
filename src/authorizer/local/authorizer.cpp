@@ -201,6 +201,28 @@ public:
 
         return authorized(request, acls_);
         break;
+      case authorization::VIEW_FRAMEWORK_WITH_INFO:
+        for (const ACL::ViewFrameworks& acl : acls.view_frameworks()) {
+          GenericACL acl_;
+          acl_.subjects = acl.principals();
+          acl_.objects = acl.roles();
+
+          acls_.push_back(acl_);
+        }
+
+        return authorized(request, acls_);
+        break;
+      case authorization::VIEW_TASK_WITH_INFO:
+        for (const ACL::ViewExecutors& acl : acls.view_executors()) {
+          GenericACL acl_;
+          acl_.subjects = acl.principals();
+          acl_.objects = acl.roles();
+
+          acls_.push_back(acl_);
+        }
+
+        return authorized(request, acls_);
+        break;
       default:
         LOG(WARNING) << "Authorization request for action '" << request.action()
                      << "' is not defined and therefore not authorized";

@@ -1601,6 +1601,42 @@ private:
   hashmap<SlaveID, TaskStateSummary> slaveTaskSummaries;
 };
 
+Future<bool> Master::Http::authorizeTaskInfo(
+    const Option<string>& principal,
+    const TaskInfo& taskInfo) const
+{
+  authorization::Request request;
+  request.set_action(authorization::VIEW_TASK_WITH_INFO);
+
+  if (principal.isSome()) {
+    request.mutable_subject()->set_value(principal.get());
+  }
+
+  request.mutable_object()->set_value(taskInfo.name());
+
+  return master->authorizer.get()->authorized(request);
+}
+
+Future<bool> Master::Http::authorizeFrameworkInfo(
+    const Option<string>& principal,
+    const FrameworkInfo& frameworkInfo) const
+{
+  if (master->authorizer.isNone()) {
+    return true;
+  }
+
+  authorization::Request request;
+  request.set_action(authorization::VIEW_FRAMEWORK_WITH_INFO);
+
+  if (principal.isSome()) {
+    request.mutable_subject()->set_value(principal.get());
+  }
+
+  request.mutable_object()->set_value(frameworkInfo.role());
+
+  return master->authorizer.get()->authorized(request);
+}
+
 
 string Master::Http::STATESUMMARY_HELP()
 {

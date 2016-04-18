@@ -34,6 +34,8 @@ The currently supported `Actions` are:
 8. "create_volumes": Create persistent volumes
 9. "destroy_volumes": Destroy persistent volumes
 10. "update_weights": Update weights
+10. "view_frameworks": View FrameworkInfo via HTTP endpoints
+10. "view_executors": View ExecutorInfo via HTTP endpoints
 
 The currently supported `Subjects` are:
 
