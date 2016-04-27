@@ -24,3 +24,8 @@ POST: Validates the request body as JSON
 ### AUTHENTICATION ###
 This endpoint requires authentication iff HTTP authentication is
 enabled.
+
+### AUTHORIZATION ###
+Authorizes certain principals to set Quota for certain
+roles and remove Quota created by certain principles.
+See authorization documentation for details.

@@ -75,6 +75,7 @@
 using google::protobuf::RepeatedPtrField;
 
 using process::AUTHENTICATION;
+using process::AUTHORIZATION;
 using process::Clock;
 using process::DESCRIPTION;
 using process::Future;
@@ -1267,7 +1268,10 @@ string Master::Http::QUOTA_HELP()
         "found.",
         "POST: Validates the request body as JSON",
         " and sets quota for a role."),
-    AUTHENTICATION(true));
+    AUTHENTICATION(true),
+    AUTHORIZATION("Authorizes certain principals to set Quota for certain",
+                  "roles and remove Quota created by certain principles.",
+                  "See authorization documentation for details."));
 }
 
 
