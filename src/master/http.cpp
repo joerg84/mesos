@@ -32,6 +32,7 @@
 
 #include <mesos/maintenance/maintenance.hpp>
 
+#include <process/collect.hpp>
 #include <process/defer.hpp>
 #include <process/help.hpp>
 
@@ -778,7 +779,7 @@ string Master::Http::FRAMEWORKS_HELP()
 
 Future<Response> Master::Http::frameworks(
     const Request& request,
-    const Option<string>& /*principal*/) const
+    const Option<string>& principal) const
 {
   auto frameworks = [this](JSON::ObjectWriter* writer) {
     // Model all of the frameworks.
@@ -1340,118 +1341,161 @@ string Master::Http::STATE_HELP()
 
 Future<Response> Master::Http::state(
     const Request& request,
-    const Option<string>& /*principal*/) const
+    const Option<string>& principal) const
 {
-  auto state = [this](JSON::ObjectWriter* writer) {
-    writer->field("version", MESOS_VERSION);
+  // Generate authorized view of master datastructures.
+  Future<AuthorizedMasterView> masterViewFuture =
+    createMasterViewFull(master, principal);
 
-    if (build::GIT_SHA.isSome()) {
-      writer->field("git_sha", build::GIT_SHA.get());
-    }
+  std::shared_ptr<process::Promise<Response>> response(
+      new process::Promise<Response>());
 
-    if (build::GIT_BRANCH.isSome()) {
-      writer->field("git_branch", build::GIT_BRANCH.get());
-    }
+  masterViewFuture.onAny(
+      [=](const Future<AuthorizedMasterView> masterViewFuture) {
+          if (!masterViewFuture.isReady()) {
+            response->set(InternalServerError("Error during Authorization"));
+            return;
+          }
 
-    if (build::GIT_TAG.isSome()) {
-      writer->field("git_tag", build::GIT_TAG.get());
-    }
+          AuthorizedMasterView masterView = masterViewFuture.get();
 
-    writer->field("build_date", build::DATE);
-    writer->field("build_time", build::TIME);
-    writer->field("build_user", build::USER);
-    writer->field("start_time", master->startTime.secs());
+          // TODO(joerg84): Get this from environment, e.g., from a flag.
+          bool httpFineGrainedAuthorization = true;
 
-    if (master->electedTime.isSome()) {
-      writer->field("elected_time", master->electedTime.get().secs());
-    }
+        auto state = [this, &masterView, &httpFineGrainedAuthorization](
+            JSON::ObjectWriter* writer) {
+          writer->field("version", MESOS_VERSION);
 
-    writer->field("id", master->info().id());
-    writer->field("pid", string(master->self()));
-    writer->field("hostname", master->info().hostname());
-    writer->field("activated_slaves", master->_slaves_active());
-    writer->field("deactivated_slaves", master->_slaves_inactive());
+          if (build::GIT_SHA.isSome()) {
+            writer->field("git_sha", build::GIT_SHA.get());
+          }
 
-    if (master->flags.cluster.isSome()) {
-      writer->field("cluster", master->flags.cluster.get());
-    }
+          if (build::GIT_BRANCH.isSome()) {
+            writer->field("git_branch", build::GIT_BRANCH.get());
+          }
 
-    if (master->leader.isSome()) {
-      writer->field("leader", master->leader.get().pid());
-    }
+          if (build::GIT_TAG.isSome()) {
+            writer->field("git_tag", build::GIT_TAG.get());
+          }
 
-    if (master->flags.log_dir.isSome()) {
-      writer->field("log_dir", master->flags.log_dir.get());
-    }
+          writer->field("build_date", build::DATE);
+          writer->field("build_time", build::TIME);
+          writer->field("build_user", build::USER);
+          writer->field("start_time", master->startTime.secs());
 
-    if (master->flags.external_log_file.isSome()) {
-      writer->field("external_log_file", master->flags.external_log_file.get());
-    }
+          if (master->electedTime.isSome()) {
+            writer->field("elected_time", master->electedTime.get().secs());
+          }
 
-    writer->field("flags", [this](JSON::ObjectWriter* writer) {
-      foreachpair (const string& name, const flags::Flag& flag, master->flags) {
-        Option<string> value = flag.stringify(master->flags);
-        if (value.isSome()) {
-          writer->field(name, value.get());
-        }
-      }
-    });
+          writer->field("id", master->info().id());
+          writer->field("pid", string(master->self()));
+          writer->field("hostname", master->info().hostname());
+          writer->field("activated_slaves", master->_slaves_active());
+          writer->field("deactivated_slaves", master->_slaves_inactive());
 
-    // Model all of the slaves.
-    writer->field("slaves", [this](JSON::ArrayWriter* writer) {
-      foreachvalue (Slave* slave, master->slaves.registered) {
-        writer->element(Full<Slave>(*slave));
-      }
-    });
+          if (master->flags.cluster.isSome()) {
+            writer->field("cluster", master->flags.cluster.get());
+          }
 
-    // Model all of the frameworks.
-    writer->field("frameworks", [this](JSON::ArrayWriter* writer) {
-      foreachvalue (Framework* framework, master->frameworks.registered) {
-        writer->element(Full<Framework>(*framework));
-      }
-    });
+          if (master->leader.isSome()) {
+            writer->field("leader", master->leader.get().pid());
+          }
 
-    // Model all of the completed frameworks.
-    writer->field("completed_frameworks", [this](JSON::ArrayWriter* writer) {
-      foreach (const std::shared_ptr<Framework>& framework,
-               master->frameworks.completed) {
-        writer->element(Full<Framework>(*framework));
-      }
-    });
+          if (master->flags.log_dir.isSome()) {
+            writer->field("log_dir", master->flags.log_dir.get());
+          }
 
-    // Model all of the orphan tasks.
-    writer->field("orphan_tasks", [this](JSON::ArrayWriter* writer) {
-      // Find those orphan tasks.
-      foreachvalue (const Slave* slave, master->slaves.registered) {
-        typedef hashmap<TaskID, Task*> TaskMap;
-        foreachvalue (const TaskMap& tasks, slave->tasks) {
-          foreachvalue (const Task* task, tasks) {
-            CHECK_NOTNULL(task);
-            if (!master->frameworks.registered.contains(task->framework_id())) {
-              writer->element(*task);
+          if (master->flags.external_log_file.isSome()) {
+            writer->field("external_log_file",
+            master->flags.external_log_file.get());
+          }
+
+          writer->field("flags", [this](JSON::ObjectWriter* writer) {
+            foreachpair (const string& name,
+                         const flags::Flag& flag, master->flags) {
+              Option<string> value = flag.stringify(master->flags);
+              if (value.isSome()) {
+                writer->field(name, value.get());
+              }
             }
-          }
-        }
-      }
-    });
+          });
 
-    // Model all currently unregistered frameworks. This can happen
-    // when a framework has yet to re-register after master failover.
-    writer->field("unregistered_frameworks", [this](JSON::ArrayWriter* writer) {
-      // Find unregistered frameworks.
-      foreachvalue (const Slave* slave, master->slaves.registered) {
-        foreachkey (const FrameworkID& frameworkId, slave->tasks) {
-          if (!master->frameworks.registered.contains(frameworkId)) {
-            writer->element(frameworkId.value());
-          }
-        }
-      }
-    });
-  };
+          // Model all of the slaves.
+          writer->field("slaves", [this](JSON::ArrayWriter* writer) {
+            foreachvalue (Slave* slave, master->slaves.registered) {
+              writer->element(Full<Slave>(*slave));
+            }
+          });
 
-  return OK(jsonify(state), request.url.query.get("jsonp"));
+          // Model all of the frameworks.
+          writer->field("frameworks",
+              [this,  &masterView, &httpFineGrainedAuthorization](
+                  JSON::ArrayWriter* writer) {
+            foreachpair (const FrameworkID& frameworkId,
+                         Framework* framework,
+                         master->frameworks.registered) {
+              // Skip unauthorized frameworks.
+              if (httpFineGrainedAuthorization &&
+                  !masterView.registered.authorizedFrameworkIds.contains(
+                  frameworkId)) {
+                continue;
+              }
+              writer->element(Full<Framework>(*framework));
+            }
+          });
+
+          // Model all of the completed frameworks.
+          writer->field("completed_frameworks",
+              [this,  &masterView, &httpFineGrainedAuthorization](
+                  JSON::ArrayWriter* writer) {
+            foreach (const std::shared_ptr<Framework>& framework,
+                     master->frameworks.completed) {
+              // Skip unauthorized frameworks.
+              if (httpFineGrainedAuthorization &&
+                  !masterView.registered.authorizedFrameworkIds.contains(
+                  framework->info.id())) {
+              continue;
+              }
+              writer->element(Full<Framework>(*framework));
+            }
+          });
+
+          // Model all of the orphan tasks.
+          writer->field("orphan_tasks", [this](JSON::ArrayWriter* writer) {
+            // Find those orphan tasks.
+            foreachvalue (const Slave* slave, master->slaves.registered) {
+              typedef hashmap<TaskID, Task*> TaskMap;
+              foreachvalue (const TaskMap& tasks, slave->tasks) {
+                foreachvalue (const Task* task, tasks) {
+                  CHECK_NOTNULL(task);
+                  if (!master->frameworks.registered.contains(
+                      task->framework_id())) {
+                    writer->element(*task);
+                  }
+                }
+              }
+            }
+          });
+
+          // Model all currently unregistered frameworks. This can happen
+          // when a framework has yet to re-register after master failover.
+          writer->field("unregistered_frameworks", [this](
+              JSON::ArrayWriter* writer) {
+            // Find unregistered frameworks.
+            foreachvalue (const Slave* slave, master->slaves.registered) {
+              foreachkey (const FrameworkID& frameworkId, slave->tasks) {
+                if (!master->frameworks.registered.contains(frameworkId)) {
+                  writer->element(frameworkId.value());
+                }
+              }
+            }
+          });
+        };
+
+        response->set(OK(jsonify(state), request.url.query.get("jsonp")));
+      });
+  return response->future();
 }
-
 
 // This abstraction has no side-effects. It factors out computing the
 // mapping from 'slaves' to 'frameworks' to answer the questions 'what
@@ -1612,7 +1656,19 @@ Future<bool> Master::Http::authorizeTaskInfo(
     request.mutable_subject()->set_value(principal.get());
   }
 
-  request.mutable_object()->set_value(taskInfo.name());
+  //  Either ExecutorInfo or CommandInfo should be set.
+  if (taskInfo.has_executor()) {
+    request.mutable_object()->mutable_executor_info()->CopyFrom(
+        taskInfo.executor());
+  }
+  else {
+    if (!taskInfo.has_command()) {
+      // This should not happen, indicated invalid TaskInfo.
+      return false;
+    }
+    request.mutable_object()->mutable_command_info()->CopyFrom(
+        taskInfo.command());
+  }
 
   return master->authorizer.get()->authorized(request);
 }
@@ -1632,7 +1688,8 @@ Future<bool> Master::Http::authorizeFrameworkInfo(
     request.mutable_subject()->set_value(principal.get());
   }
 
-  request.mutable_object()->set_value(frameworkInfo.role());
+  request.mutable_object()->mutable_framework_info()->CopyFrom(
+        frameworkInfo);
 
   return master->authorizer.get()->authorized(request);
 }
@@ -1652,109 +1709,147 @@ string Master::Http::STATESUMMARY_HELP()
 
 Future<Response> Master::Http::stateSummary(
     const Request& request,
-    const Option<string>& /*principal*/) const
+    const Option<string>& principal) const
 {
-  auto stateSummary = [this](JSON::ObjectWriter* writer) {
-    writer->field("hostname", master->info().hostname());
+  // Generate authorized view of master datastructures.
+  Future<AuthorizedMasterView> masterViewFuture =
+    createMasterViewSummary(master, principal);
 
-    if (master->flags.cluster.isSome()) {
-      writer->field("cluster", master->flags.cluster.get());
-    }
+  std::shared_ptr<process::Promise<Response>> response(
+      new process::Promise<Response>());
 
-    // We use the tasks in the 'Frameworks' struct to compute summaries
-    // for this endpoint. This is done 1) for consistency between the
-    // 'slaves' and 'frameworks' subsections below 2) because we want to
-    // provide summary information for frameworks that are currently
-    // registered 3) the frameworks keep a circular buffer of completed
-    // tasks that we can use to keep a limited view on the history of
-    // recent completed / failed tasks.
+  masterViewFuture.onAny(
+      [=](const Future<AuthorizedMasterView> masterViewFuture) {
+        if (!masterViewFuture.isReady()) {
+          response->set(InternalServerError("Error during Authorization"));
+          return;
+        }
+        AuthorizedMasterView masterView = masterViewFuture.get();
 
-    // Generate mappings from 'slave' to 'framework' and reverse.
-    SlaveFrameworkMapping slaveFrameworkMapping(master->frameworks.registered);
+        // TODO(joerg84): Retrieve this from environment, e.g., flags.
+        bool httpFineGrainedAuthorization = true;
 
-    // Generate 'TaskState' summaries for all framework and slave ids.
-    TaskStateSummaries taskStateSummaries(master->frameworks.registered);
+        auto stateSummary = [this, &masterView, &httpFineGrainedAuthorization](
+            JSON::ObjectWriter* writer) {
+          writer->field("hostname", master->info().hostname());
 
-    // Model all of the slaves.
-    writer->field("slaves", [this,
-                             &slaveFrameworkMapping,
-                             &taskStateSummaries](JSON::ArrayWriter* writer) {
-      foreachvalue (Slave* slave, master->slaves.registered) {
-        writer->element([&slave,
-                         &slaveFrameworkMapping,
-                         &taskStateSummaries](JSON::ObjectWriter* writer) {
-          json(writer, Summary<Slave>(*slave));
+          if (master->flags.cluster.isSome()) {
+            writer->field("cluster", master->flags.cluster.get());
+          }
 
-          // Add the 'TaskState' summary for this slave.
-          const TaskStateSummary& summary = taskStateSummaries.slave(slave->id);
+          // We use the tasks in the 'Frameworks' struct to compute summaries
+          // for this endpoint. This is done 1) for consistency between the
+          // 'slaves' and 'frameworks' subsections below 2) because we want to
+          // provide summary information for frameworks that are currently
+          // registered 3) the frameworks keep a circular buffer of completed
+          // tasks that we can use to keep a limited view on the history of
+          // recent completed / failed tasks.
 
-          writer->field("TASK_STAGING", summary.staging);
-          writer->field("TASK_STARTING", summary.starting);
-          writer->field("TASK_RUNNING", summary.running);
-          writer->field("TASK_KILLING", summary.killing);
-          writer->field("TASK_FINISHED", summary.finished);
-          writer->field("TASK_KILLED", summary.killed);
-          writer->field("TASK_FAILED", summary.failed);
-          writer->field("TASK_LOST", summary.lost);
-          writer->field("TASK_ERROR", summary.error);
+          // Generate mappings from 'slave' to 'framework' and reverse.
+          SlaveFrameworkMapping slaveFrameworkMapping(
+              master->frameworks.registered);
 
-          // Add the ids of all the frameworks running on this slave.
-          const hashset<FrameworkID>& frameworks =
-            slaveFrameworkMapping.frameworks(slave->id);
+          // Generate 'TaskState' summaries for all framework and slave ids.
+          TaskStateSummaries taskStateSummaries(master->frameworks.registered);
 
-          writer->field("framework_ids",
-                        [&frameworks](JSON::ArrayWriter* writer) {
-            foreach (const FrameworkID& frameworkId, frameworks) {
-              writer->element(frameworkId.value());
+          // Model all of the slaves.
+          writer->field("slaves", [this,
+                                   &slaveFrameworkMapping,
+                                   &taskStateSummaries](
+                                     JSON::ArrayWriter* writer) {
+            foreachvalue (Slave* slave, master->slaves.registered) {
+              writer->element([&slave,
+                               &slaveFrameworkMapping,
+                               &taskStateSummaries](
+                                 JSON::ObjectWriter* writer) {
+                json(writer, Summary<Slave>(*slave));
+
+                // Add the 'TaskState' summary for this slave.
+                const TaskStateSummary& summary = taskStateSummaries.slave(
+                    slave->id);
+
+                writer->field("TASK_STAGING", summary.staging);
+                writer->field("TASK_STARTING", summary.starting);
+                writer->field("TASK_RUNNING", summary.running);
+                writer->field("TASK_KILLING", summary.killing);
+                writer->field("TASK_FINISHED", summary.finished);
+                writer->field("TASK_KILLED", summary.killed);
+                writer->field("TASK_FAILED", summary.failed);
+                writer->field("TASK_LOST", summary.lost);
+                writer->field("TASK_ERROR", summary.error);
+
+                // Add the ids of all the frameworks running on this slave.
+                const hashset<FrameworkID>& frameworks =
+                  slaveFrameworkMapping.frameworks(slave->id);
+
+                writer->field("framework_ids",
+                              [&frameworks](JSON::ArrayWriter* writer) {
+                  foreach (const FrameworkID& frameworkId, frameworks) {
+                    writer->element(frameworkId.value());
+                  }
+                });
+              });
             }
           });
-        });
-      }
-    });
 
-    // Model all of the frameworks.
-    writer->field("frameworks",
-                  [this,
-                   &slaveFrameworkMapping,
-                   &taskStateSummaries](JSON::ArrayWriter* writer) {
-      foreachpair (const FrameworkID& frameworkId,
-                   Framework* framework,
-                   master->frameworks.registered) {
-        writer->element([&frameworkId,
-                         &framework,
+          // Model all of the frameworks.
+          writer->field("frameworks",
+                        [this,
                          &slaveFrameworkMapping,
-                         &taskStateSummaries](JSON::ObjectWriter* writer) {
-          json(writer, Summary<Framework>(*framework));
+                         &taskStateSummaries,
+                         &masterView,
+                         &httpFineGrainedAuthorization](
+                           JSON::ArrayWriter* writer) {
+            foreachpair (const FrameworkID& frameworkId,
+                         Framework* framework,
+                         master->frameworks.registered) {
+              // Skip unauthorized frameworks.
+              if (httpFineGrainedAuthorization &&
+                  !masterView.registered.authorizedFrameworkIds.contains(
+                      frameworkId)) {
+                continue;
+              }
 
-          // Add the 'TaskState' summary for this framework.
-          const TaskStateSummary& summary =
-            taskStateSummaries.framework(frameworkId);
+              writer->element([&frameworkId,
+                               &framework,
+                               &slaveFrameworkMapping,
+                               &taskStateSummaries](
+                                 JSON::ObjectWriter* writer) {
+                json(writer, Summary<Framework>(*framework));
 
-          writer->field("TASK_STAGING", summary.staging);
-          writer->field("TASK_STARTING", summary.starting);
-          writer->field("TASK_RUNNING", summary.running);
-          writer->field("TASK_KILLING", summary.killing);
-          writer->field("TASK_FINISHED", summary.finished);
-          writer->field("TASK_KILLED", summary.killed);
-          writer->field("TASK_FAILED", summary.failed);
-          writer->field("TASK_LOST", summary.lost);
-          writer->field("TASK_ERROR", summary.error);
+                // Add the 'TaskState' summary for this framework.
+                const TaskStateSummary& summary =
+                  taskStateSummaries.framework(frameworkId);
 
-          // Add the ids of all the slaves running this framework.
-          const hashset<SlaveID>& slaves =
-            slaveFrameworkMapping.slaves(frameworkId);
+                writer->field("TASK_STAGING", summary.staging);
+                writer->field("TASK_STARTING", summary.starting);
+                writer->field("TASK_RUNNING", summary.running);
+                writer->field("TASK_KILLING", summary.killing);
+                writer->field("TASK_FINISHED", summary.finished);
+                writer->field("TASK_KILLED", summary.killed);
+                writer->field("TASK_FAILED", summary.failed);
+                writer->field("TASK_LOST", summary.lost);
+                writer->field("TASK_ERROR", summary.error);
 
-          writer->field("slave_ids", [&slaves](JSON::ArrayWriter* writer) {
-            foreach (const SlaveID& slaveId, slaves) {
-              writer->element(slaveId.value());
+                // Add the ids of all the slaves running this framework.
+                const hashset<SlaveID>& slaves =
+                  slaveFrameworkMapping.slaves(frameworkId);
+
+                writer->field("slave_ids", [&slaves](
+                    JSON::ArrayWriter* writer) {
+                  foreach (const SlaveID& slaveId, slaves) {
+                    writer->element(slaveId.value());
+                  }
+                });
+              });
             }
           });
-        });
-      }
-    });
-  };
+        };
 
-  return OK(jsonify(stateSummary), request.url.query.get("jsonp"));
+        response->set(OK(jsonify(stateSummary),
+                      request.url.query.get("jsonp")));
+      });
+  return response->future();
 }
 
 
@@ -2023,60 +2118,95 @@ struct TaskComparator
 
 Future<Response> Master::Http::tasks(
     const Request& request,
-    const Option<string>& /*principal*/) const
+    const Option<string>& principal) const
 {
-  // Get list options (limit and offset).
-  Result<int> result = numify<int>(request.url.query.get("limit"));
-  size_t limit = result.isSome() ? result.get() : TASK_LIMIT;
+  // Generate authorized view of master datastructures.
+  Future<AuthorizedMasterView> masterViewFuture =
+    createMasterViewTasks(master, principal);
 
-  result = numify<int>(request.url.query.get("offset"));
-  size_t offset = result.isSome() ? result.get() : 0;
+  std::shared_ptr<process::Promise<Response>> response(
+      new process::Promise<Response>());
 
-  // TODO(nnielsen): Currently, formatting errors in offset and/or limit
-  // will silently be ignored. This could be reported to the user instead.
+  masterViewFuture.onAny(
+      [=](const Future<AuthorizedMasterView> masterViewFuture) {
+          if (!masterViewFuture.isReady()) {
+            response->set(InternalServerError("Error during Authorization"));
+            return;
+          }
 
-  // Construct framework list with both active and completed frameworks.
-  vector<const Framework*> frameworks;
-  foreachvalue (Framework* framework, master->frameworks.registered) {
-    frameworks.push_back(framework);
-  }
-  foreach (const std::shared_ptr<Framework>& framework,
-           master->frameworks.completed) {
-    frameworks.push_back(framework.get());
-  }
+          AuthorizedMasterView masterView = masterViewFuture.get();
 
-  // Construct task list with both running and finished tasks.
-  vector<const Task*> tasks;
-  foreach (const Framework* framework, frameworks) {
-    foreachvalue (Task* task, framework->tasks) {
-      CHECK_NOTNULL(task);
-      tasks.push_back(task);
-    }
-    foreach (const std::shared_ptr<Task>& task, framework->completedTasks) {
-      tasks.push_back(task.get());
-    }
-  }
+          // TODO(joerg84): Retrieve this from the environment, e.g., flags.
+          bool httpFineGrainedAuthorization = true;
 
-  // Sort tasks by task status timestamp. Default order is descending.
-  // The earliest timestamp is chosen for comparison when multiple are present.
-  Option<string> order = request.url.query.get("order");
-  if (order.isSome() && (order.get() == "asc")) {
-    sort(tasks.begin(), tasks.end(), TaskComparator::ascending);
-  } else {
-    sort(tasks.begin(), tasks.end(), TaskComparator::descending);
-  }
+          // Get list options (limit and offset).
+          Result<int> result = numify<int>(request.url.query.get("limit"));
+          size_t limit = result.isSome() ? result.get() : TASK_LIMIT;
 
-  auto tasksWriter = [&tasks, limit, offset](JSON::ObjectWriter* writer) {
-    writer->field("tasks", [&tasks, limit, offset](JSON::ArrayWriter* writer) {
-      size_t end = std::min(offset + limit, tasks.size());
-      for (size_t i = offset; i < end; i++) {
-        const Task* task = tasks[i];
-        writer->element(*task);
-      }
-    });
-  };
+          result = numify<int>(request.url.query.get("offset"));
+          size_t offset = result.isSome() ? result.get() : 0;
 
-  return OK(jsonify(tasksWriter), request.url.query.get("jsonp"));
+          // TODO(nnielsen): Currently, formatting errors in offset and/or limit
+          // will silently be ignored. This could be reported to the user
+          // instead.
+
+          // Construct framework list with both active and completed frameworks.
+          vector<const Framework*> frameworks;
+          foreachpair (const FrameworkID& frameworkId,
+                       Framework* framework,
+                       master->frameworks.registered) {
+            // Skip unauthorized frameworks.
+              if (httpFineGrainedAuthorization &&
+                  !masterView.registered.authorizedFrameworkIds.contains(
+                      frameworkId)) {
+                continue;
+              }
+            frameworks.push_back(framework);
+          }
+          foreach (const std::shared_ptr<Framework>& framework,
+                   master->frameworks.completed) {
+            frameworks.push_back(framework.get());
+          }
+
+          // Construct task list with both running and finished tasks.
+          vector<const Task*> tasks;
+          foreach (const Framework* framework, frameworks) {
+            foreachvalue (Task* task, framework->tasks) {
+              CHECK_NOTNULL(task);
+              tasks.push_back(task);
+            }
+            foreach (const std::shared_ptr<Task>& task,
+                     framework->completedTasks) {
+              tasks.push_back(task.get());
+            }
+          }
+
+          // Sort tasks by task status timestamp. Default order is descending.
+          // The earliest timestamp is chosen for comparison when multiple are
+          // present.
+          Option<string> order = request.url.query.get("order");
+          if (order.isSome() && (order.get() == "asc")) {
+            sort(tasks.begin(), tasks.end(), TaskComparator::ascending);
+          } else {
+            sort(tasks.begin(), tasks.end(), TaskComparator::descending);
+          }
+
+          auto tasksWriter = [&tasks, limit, offset](
+              JSON::ObjectWriter* writer) {
+            writer->field("tasks", [&tasks, limit, offset](
+                JSON::ArrayWriter* writer) {
+              size_t end = std::min(offset + limit, tasks.size());
+              for (size_t i = offset; i < end; i++) {
+                const Task* task = tasks[i];
+                writer->element(*task);
+              }
+            });
+          };
+
+          response->set(OK(jsonify(tasksWriter),
+                        request.url.query.get("jsonp")));
+        });
+        return response->future();
 }
 
 
@@ -2663,6 +2793,203 @@ Future<Response> Master::Http::_operation(
     .repair([](const Future<Response>& result) {
        return Conflict(result.failure());
     });
+}
+
+// Creates authorized view of master datastructures.
+Future<Master::Http::AuthorizedMasterView>
+  Master::Http::createMasterViewSummary(
+    const Master* master,
+    const Option<string>& principal) const
+{
+  // TODO(joerg84): Add check whether authz is enabled.
+
+  std::shared_ptr<process::Promise<Master::Http::AuthorizedMasterView>> promise(
+      new process::Promise<Master::Http::AuthorizedMasterView>());
+
+  list<FrameworkID> frameworkIds;
+  list<Future<bool>> authorizedFrameworks;
+
+  // Check all registered frameworks
+  foreachpair (const FrameworkID& frameworkId,
+               Framework* framework,
+               master->frameworks.registered) {
+      frameworkIds.emplace_back(frameworkId);
+      authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
+          principal,
+          framework->info));
+  }
+
+  collect(authorizedFrameworks).onAny([=](
+      const Future<list<bool>>& authorizedFrameworks) {
+    if (authorizedFrameworks.isReady()) {
+      AuthorizedMasterView masterView;
+
+      CHECK_EQ(frameworkIds.size(), authorizedFrameworks.get().size());
+
+      // We manually loop over both lists synchronously.
+      auto frameworksIterator = frameworkIds.begin();
+      auto boolIterator = authorizedFrameworks.get().begin();
+      for (; frameworksIterator != frameworkIds.end() &&
+          boolIterator != authorizedFrameworks.get().end();
+          ++frameworksIterator, ++boolIterator) {
+        if (*boolIterator) {
+          LOG(INFO) << "Authorized Framework for MasterView: "
+                    << *frameworksIterator;
+          masterView.registered.authorizedFrameworkIds.insert(
+              *frameworksIterator);
+        } else {
+          LOG(INFO) << "Unauthorized Framework for MasterView: "
+                    << *frameworksIterator;
+        }
+      }
+
+      promise->set(masterView);
+    } else {
+      if (authorizedFrameworks.isFailed()) {
+        promise->fail("Authorize Frameworks failed: Future failed");
+      }
+      else {
+        promise->fail("Authorize Frameworks failed: Future discarded");
+      }
+    }
+  });
+
+  return promise->future();
+}
+
+// Creates authorized view of master datastructures.
+Future<Master::Http::AuthorizedMasterView> Master::Http::createMasterViewFull(
+    const Master* master,
+    const Option<string>& principal) const
+{
+  LOG(INFO) << "Creating MasterViewFull ";
+
+  // TODO(joerg84): Add check whether authz is enabled.
+
+  std::shared_ptr<process::Promise<Master::Http::AuthorizedMasterView>> promise(
+      new process::Promise<Master::Http::AuthorizedMasterView>());
+
+  list<FrameworkID> frameworkIds;
+  list<Future<bool>> authorizedFrameworks;
+
+  // Check registered frameworks.
+  foreachpair (const FrameworkID& frameworkId,
+               Framework* framework,
+               master->frameworks.registered) {
+    frameworkIds.emplace_back(frameworkId);
+    authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
+        principal,
+        framework->info));
+  }
+
+  // Check completed frameworks.
+  foreach (const std::shared_ptr<Framework>& framework,
+                     master->frameworks.completed) {
+    frameworkIds.emplace_back(framework->info.id());
+    authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
+        principal,
+        framework->info));
+  }
+
+  collect(authorizedFrameworks).onAny([=](
+      const Future<list<bool>>& authorizedFrameworks) {
+    if (authorizedFrameworks.isReady()) {
+      AuthorizedMasterView masterView;
+
+      CHECK_EQ(frameworkIds.size(), authorizedFrameworks.get().size());
+
+      // We manually loop over both lists synchronously.
+      auto frameworksIterator = frameworkIds.begin();
+      auto boolIterator = authorizedFrameworks.get().begin();
+      for (; frameworksIterator != frameworkIds.end() &&
+          boolIterator != authorizedFrameworks.get().end();
+          ++frameworksIterator, ++boolIterator) {
+        if (*boolIterator) {
+          LOG(INFO) << "Authorized Framework for MasterView: "
+                    << *frameworksIterator;
+          masterView.registered.authorizedFrameworkIds.insert(
+              *frameworksIterator);
+        } else {
+          LOG(INFO) << "Unauthorized Framework for MasterView: "
+                    << *frameworksIterator;
+        }
+      }
+
+      promise->set(masterView);
+    } else {
+      if (authorizedFrameworks.isFailed()) {
+        promise->fail("Authorize Frameworks failed: Future failed");
+      }
+      else {
+        promise->fail("Authorize Frameworks failed: Future discarded");
+      }
+    }
+  });
+
+  return promise->future();
+}
+
+// Creates authorized view of master datastructures.
+Future<Master::Http::AuthorizedMasterView> Master::Http::createMasterViewTasks(
+    const Master* master,
+    const Option<string>& principal) const
+{
+  LOG(INFO) << "Creating MasterViewSummary ";
+
+  // TODO(joerg84): Add check whether authz is enabled.
+
+  std::shared_ptr<process::Promise<Master::Http::AuthorizedMasterView>> promise(
+      new process::Promise<Master::Http::AuthorizedMasterView>());
+
+  list<FrameworkID> frameworkIds;
+  list<Future<bool>> authorizedFrameworks;
+
+  // Check all registered frameworks
+  foreachpair (const FrameworkID& frameworkId,
+               Framework* framework,
+               master->frameworks.registered) {
+      frameworkIds.emplace_back(frameworkId);
+      authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
+          principal,
+          framework->info));
+  }
+
+  collect(authorizedFrameworks).onAny([=](
+      const Future<list<bool>>& authorizedFrameworks) {
+    if (authorizedFrameworks.isReady()) {
+      AuthorizedMasterView masterView;
+
+      CHECK_EQ(frameworkIds.size(), authorizedFrameworks.get().size());
+
+      // We manually loop over both lists synchronously.
+      auto frameworksIterator = frameworkIds.begin();
+      auto boolIterator = authorizedFrameworks.get().begin();
+      for (; frameworksIterator != frameworkIds.end() &&
+          boolIterator != authorizedFrameworks.get().end();
+          ++frameworksIterator, ++boolIterator) {
+        if (*boolIterator) {
+          LOG(INFO) << "Authorized Framework for MasterView: "
+                    << *frameworksIterator;
+          masterView.registered.authorizedFrameworkIds.insert(
+              *frameworksIterator);
+        } else {
+          LOG(INFO) << "Unauthorized Framework for MasterView: "
+                    << *frameworksIterator;
+        }
+      }
+
+      promise->set(masterView);
+    } else {
+      if (authorizedFrameworks.isFailed()) {
+        promise->fail("Authorize Frameworks failed: Future failed");
+      }
+      else {
+        promise->fail("Authorize Frameworks failed: Future discarded");
+      }
+    }
+  });
+
+  return promise->future();
 }
 
 } // namespace master {

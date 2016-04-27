@@ -37,6 +37,9 @@ message Subject {
 // be run as. If the value is not set, the object is unknown.
 message Object {
   optional string value = 1;
+  optional FrameworkInfo framework_info = 2;
+  optional ExecutorInfo executor_info = 3;
+  optional CommandInfo command_info = 4;
 }
 
 

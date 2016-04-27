@@ -249,6 +249,22 @@ private:
     if (request.object().has_value()) {
       object.add_values(request.object().value());
       object.set_type(mesos::ACL::Entity::SOME);
+    } else if (request.object().has_framework_info()) {
+      // The localauthorizer uses the role field of the FrameworkInfo
+      // as object.
+      object.add_values(request.object().framework_info().role());
+      object.set_type(mesos::ACL::Entity::SOME);
+    } else if (request.object().has_executor_info()) {
+      // The localauthorizer uses the name field of the ExecutorInfo
+      // as object.
+      object.add_values(request.object().executor_info().name());
+      object.set_type(mesos::ACL::Entity::SOME);
+    } else if (request.object().has_command_info()) {
+      // The localauthorizer uses the name field of the ExecutorInfo
+      // as object.
+      // TODO(joerg84): Add check whether user is set.
+      object.add_values(request.object().command_info().user());
+      object.set_type(mesos::ACL::Entity::SOME);
     } else {
       object.set_type(mesos::ACL::Entity::ANY);
     }

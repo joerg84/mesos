@@ -1200,10 +1200,40 @@ private:
     static std::string QUOTA_HELP();
     static std::string WEIGHTS_HELP();
 
+    struct AuthorizedMasterView
+    {
+      struct RegisteredFrameworks
+      {
+        hashset<FrameworkID> authorizedFrameworkIds;
+      };
+
+    RegisteredFrameworks registered;
+
+    private:
+      // Master* master;
+    };
+
+    process::Future<AuthorizedMasterView> createMasterViewSummary(
+      const Master* master, const Option<std::string>& principal) const;
+
+    process::Future<AuthorizedMasterView> createMasterViewFull(
+      const Master* master, const Option<std::string>& principal) const;
+
+    process::Future<AuthorizedMasterView> createMasterViewTasks(
+      const Master* master, const Option<std::string>& principal) const;
+
   private:
     // Continuations.
     process::Future<process::http::Response> _teardown(
         const FrameworkID& id) const;
+
+    process::Future<bool> authorizeFrameworkInfo(
+        const Option<std::string>& principal,
+        const FrameworkInfo& frameworkInfo) const;
+
+    process::Future<bool> authorizeTaskInfo(
+        const Option<std::string>& principal,
+        const TaskInfo& taskInfo) const;
 
     /**
      * Continuation for operations: /reserve, /unreserve,
