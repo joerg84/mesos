@@ -1206,6 +1206,10 @@ private:
     {
       hashset<FrameworkID> authorizedFrameworkIds;
 
+      hashset<TaskID> authorizedTaskIds;
+
+      hashset<ExecutorID> authorizedExecutorIds;
+
       bool httpAuthorizationFiltering;
     };
 
@@ -1217,6 +1221,13 @@ private:
       const Master* master,
       const Option<std::string>& principal,
       const bool httpAuthorizationFiltering) const;
+
+    // /state endpoint
+    process::Future<AuthorizedMasterView> createMasterViewState(
+      const Master* master,
+      const Option<std::string>& principal,
+      const bool httpAuthorizationFiltering) const;
+
   private:
     // Continuations.
     process::Future<process::http::Response> _teardown(
@@ -1225,6 +1236,18 @@ private:
     process::Future<bool> authorizeFrameworkInfo(
         const Option<std::string>& principal,
         const FrameworkInfo& frameworkInfo) const;
+
+    process::Future<bool> authorizeExecutorInfo(
+        const Option<std::string>& principal,
+        const ExecutorInfo& executorInfo) const;
+
+    process::Future<bool> authorizeTaskInfo(
+        const Option<std::string>& principal,
+        const TaskInfo& taskInfo) const;
+
+    process::Future<bool> authorizeTask(
+        const Option<std::string>& principal,
+        const Task& task) const;
 
     /**
      * Continuation for operations: /reserve, /unreserve,
@@ -1266,6 +1289,7 @@ private:
 
   friend struct Framework;
   friend struct Metrics;
+  friend struct FrameworkWriter;
 
   // NOTE: Since 'getOffer' and 'slaves' are protected,
   // we need to make the following functions friends.

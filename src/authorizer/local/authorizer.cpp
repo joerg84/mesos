@@ -275,6 +275,48 @@ private:
             object.set_type(mesos::ACL::Entity::SOME);
             break;
         }
+        case authorization::VIEW_TASK_WITH_EXECUTOR_INFO: {
+            // Parse ExecutorInfo from object.
+            ExecutorInfo executorInfo;
+            if (!executorInfo.ParseFromString(request.object().value())) {
+              // Error
+            }
+
+            // The localauthorizer uses the role field of the FrameworkInfo
+            // as object.
+            // TODO(joerg84): Check has_user().
+            object.add_values(executorInfo.command().user());
+            object.set_type(mesos::ACL::Entity::SOME);
+            break;
+        }
+        case authorization::VIEW_TASK_WITH_COMMAND_INFO: {
+            // Parse CommandInfo from object.
+            CommandInfo commandInfo;
+            if (!commandInfo.ParseFromString(request.object().value())) {
+              // Error
+            }
+
+            // The localauthorizer uses the role field of the FrameworkInfo
+            // as object.
+            // TODO(joerg84): Check has_user().
+            object.add_values(commandInfo.user());
+            object.set_type(mesos::ACL::Entity::SOME);
+            break;
+        }
+        case authorization::VIEW_TASK_WITH_TASK: {
+            // Parse CommandInfo from object.
+            Task task;
+            if (!task.ParseFromString(request.object().value())) {
+              // Error
+            }
+
+            // The localauthorizer uses the role field of the FrameworkInfo
+            // as object.
+            // TODO(joerg84): Check has_user().
+            object.add_values(task.user());
+            object.set_type(mesos::ACL::Entity::SOME);
+            break;
+        }
         default: // Object is treated as standard string.
           object.add_values(request.object().value());
           object.set_type(mesos::ACL::Entity::SOME);
