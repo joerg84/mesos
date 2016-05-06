@@ -180,6 +180,16 @@ Task createTask(
     t.mutable_container()->CopyFrom(task.container());
   }
 
+  if (task.has_command()) {
+    if (task.command().has_user()) {
+      t.set_user(task.command().user());
+    }
+  } else if (task.has_executor()) {
+    if (task.executor().command().has_user()) {
+      t.set_user(task.executor().command().user());
+    }
+  }
+
   return t;
 }
 
