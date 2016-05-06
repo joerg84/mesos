@@ -260,8 +260,25 @@ private:
 
     ACL::Entity object;
     if (request.object().has_value()) {
-      object.add_values(request.object().value());
-      object.set_type(mesos::ACL::Entity::SOME);
+      // Unpack Protobuf messages for actions with protobuf objects.
+      switch (request.action()) {
+        case authorization::VIEW_FRAMEWORK_WITH_INFO: {
+            // Parse FrameworkInfo from object.
+            FrameworkInfo frameworkInfo;
+            if (!frameworkInfo.ParseFromString(request.object().value())) {
+              // Error
+            }
+
+            // The localauthorizer uses the role field of the FrameworkInfo
+            // as object.
+            object.add_values(frameworkInfo.role());
+            object.set_type(mesos::ACL::Entity::SOME);
+            break;
+        }
+        default: // Object is treated as standard string.
+          object.add_values(request.object().value());
+          object.set_type(mesos::ACL::Entity::SOME);
+      }
     } else {
       object.set_type(mesos::ACL::Entity::ANY);
     }

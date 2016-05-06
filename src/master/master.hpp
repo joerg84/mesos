@@ -1200,10 +1200,31 @@ private:
     static std::string QUOTA_HELP();
     static std::string WEIGHTS_HELP();
 
+    // Struct holding the authorized ids for various master entities
+    // such as frameworks or tasks.
+    struct AuthorizedMasterView
+    {
+      hashset<FrameworkID> authorizedFrameworkIds;
+
+      bool httpAuthorizationFiltering;
+    };
+
+    // Builder functions for creating a MasterView object for different
+    // endpoints.
+
+    // /state-summary endpoint
+    process::Future<AuthorizedMasterView> createMasterViewStateSummary(
+      const Master* master,
+      const Option<std::string>& principal,
+      const bool httpAuthorizationFiltering) const;
   private:
     // Continuations.
     process::Future<process::http::Response> _teardown(
         const FrameworkID& id) const;
+
+    process::Future<bool> authorizeFrameworkInfo(
+        const Option<std::string>& principal,
+        const FrameworkInfo& frameworkInfo) const;
 
     /**
      * Continuation for operations: /reserve, /unreserve,

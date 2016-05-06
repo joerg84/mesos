@@ -32,6 +32,7 @@
 
 #include <mesos/maintenance/maintenance.hpp>
 
+#include <process/collect.hpp>
 #include <process/defer.hpp>
 #include <process/help.hpp>
 
@@ -1708,6 +1709,32 @@ private:
 };
 
 
+Future<bool> Master::Http::authorizeFrameworkInfo(
+    const Option<string>& principal,
+    const FrameworkInfo& frameworkInfo) const
+{
+  if (master->authorizer.isNone()) {
+    return true;
+  }
+
+  authorization::Request request;
+  request.set_action(authorization::VIEW_FRAMEWORK_WITH_INFO);
+
+  if (principal.isSome()) {
+    request.mutable_subject()->set_value(principal.get());
+  }
+
+  string object;
+  if (!frameworkInfo.SerializeToString(&object)) {
+    // Error.
+    return false;
+  }
+  request.mutable_object()->set_value(object);
+
+  return master->authorizer.get()->authorized(request);
+}
+
+
 string Master::Http::STATESUMMARY_HELP()
 {
   return HELP(
@@ -1728,114 +1755,151 @@ string Master::Http::STATESUMMARY_HELP()
 
 Future<Response> Master::Http::stateSummary(
     const Request& request,
-    const Option<string>& /*principal*/) const
+    const Option<string>& principal) const
 {
   // When current master is not the leader, redirect to the leading master.
   if (!master->elected()) {
     return redirect(request);
   }
 
-  auto stateSummary = [this](JSON::ObjectWriter* writer) {
-    writer->field("hostname", master->info().hostname());
+  bool httpAuthorizationFiltering =
+    master->flags.endpoint_authorization_filtering;
 
-    if (master->flags.cluster.isSome()) {
-      writer->field("cluster", master->flags.cluster.get());
-    }
+  // Generate authorized view of master datastructures.
+  Future<AuthorizedMasterView> masterViewFuture =
+    createMasterViewStateSummary(master, principal, httpAuthorizationFiltering);
 
-    // We use the tasks in the 'Frameworks' struct to compute summaries
-    // for this endpoint. This is done 1) for consistency between the
-    // 'slaves' and 'frameworks' subsections below 2) because we want to
-    // provide summary information for frameworks that are currently
-    // registered 3) the frameworks keep a circular buffer of completed
-    // tasks that we can use to keep a limited view on the history of
-    // recent completed / failed tasks.
+  std::shared_ptr<process::Promise<Response>> response(
+      new process::Promise<Response>());
 
-    // Generate mappings from 'slave' to 'framework' and reverse.
-    SlaveFrameworkMapping slaveFrameworkMapping(master->frameworks.registered);
+  masterViewFuture.onAny(
+      [=](const Future<AuthorizedMasterView> masterViewFuture) {
+        if (!masterViewFuture.isReady()) {
+          response->set(InternalServerError("Error during Authorization"));
+          return;
+        }
+        AuthorizedMasterView masterView = masterViewFuture.get();
 
-    // Generate 'TaskState' summaries for all framework and slave ids.
-    TaskStateSummaries taskStateSummaries(master->frameworks.registered);
+        auto stateSummary = [this, &masterView](
+            JSON::ObjectWriter* writer) {
+          writer->field("hostname", master->info().hostname());
 
-    // Model all of the slaves.
-    writer->field("slaves", [this,
-                             &slaveFrameworkMapping,
-                             &taskStateSummaries](JSON::ArrayWriter* writer) {
-      foreachvalue (Slave* slave, master->slaves.registered) {
-        writer->element([&slave,
-                         &slaveFrameworkMapping,
-                         &taskStateSummaries](JSON::ObjectWriter* writer) {
-          json(writer, Summary<Slave>(*slave));
+          if (master->flags.cluster.isSome()) {
+            writer->field("cluster", master->flags.cluster.get());
+          }
 
-          // Add the 'TaskState' summary for this slave.
-          const TaskStateSummary& summary = taskStateSummaries.slave(slave->id);
+          // We use the tasks in the 'Frameworks' struct to compute summaries
+          // for this endpoint. This is done 1) for consistency between the
+          // 'slaves' and 'frameworks' subsections below 2) because we want to
+          // provide summary information for frameworks that are currently
+          // registered 3) the frameworks keep a circular buffer of completed
+          // tasks that we can use to keep a limited view on the history of
+          // recent completed / failed tasks.
 
-          writer->field("TASK_STAGING", summary.staging);
-          writer->field("TASK_STARTING", summary.starting);
-          writer->field("TASK_RUNNING", summary.running);
-          writer->field("TASK_KILLING", summary.killing);
-          writer->field("TASK_FINISHED", summary.finished);
-          writer->field("TASK_KILLED", summary.killed);
-          writer->field("TASK_FAILED", summary.failed);
-          writer->field("TASK_LOST", summary.lost);
-          writer->field("TASK_ERROR", summary.error);
+          // Generate mappings from 'slave' to 'framework' and reverse.
+          SlaveFrameworkMapping slaveFrameworkMapping(
+              master->frameworks.registered);
 
-          // Add the ids of all the frameworks running on this slave.
-          const hashset<FrameworkID>& frameworks =
-            slaveFrameworkMapping.frameworks(slave->id);
+          // Generate 'TaskState' summaries for all framework and slave ids.
+          TaskStateSummaries taskStateSummaries(master->frameworks.registered);
 
-          writer->field("framework_ids",
-                        [&frameworks](JSON::ArrayWriter* writer) {
-            foreach (const FrameworkID& frameworkId, frameworks) {
-              writer->element(frameworkId.value());
+          // Model all of the slaves.
+          writer->field("slaves", [this,
+                                   &slaveFrameworkMapping,
+                                   &taskStateSummaries](
+                                     JSON::ArrayWriter* writer) {
+            foreachvalue (Slave* slave, master->slaves.registered) {
+              writer->element([&slave,
+                               &slaveFrameworkMapping,
+                               &taskStateSummaries](
+                                 JSON::ObjectWriter* writer) {
+                json(writer, Summary<Slave>(*slave));
+
+                // Add the 'TaskState' summary for this slave.
+                const TaskStateSummary& summary = taskStateSummaries.slave(
+                    slave->id);
+
+                writer->field("TASK_STAGING", summary.staging);
+                writer->field("TASK_STARTING", summary.starting);
+                writer->field("TASK_RUNNING", summary.running);
+                writer->field("TASK_KILLING", summary.killing);
+                writer->field("TASK_FINISHED", summary.finished);
+                writer->field("TASK_KILLED", summary.killed);
+                writer->field("TASK_FAILED", summary.failed);
+                writer->field("TASK_LOST", summary.lost);
+                writer->field("TASK_ERROR", summary.error);
+
+                // Add the ids of all the frameworks running on this slave.
+                const hashset<FrameworkID>& frameworks =
+                  slaveFrameworkMapping.frameworks(slave->id);
+
+                writer->field("framework_ids",
+                              [&frameworks](JSON::ArrayWriter* writer) {
+                  foreach (const FrameworkID& frameworkId, frameworks) {
+                    writer->element(frameworkId.value());
+                  }
+                });
+              });
             }
           });
-        });
-      }
-    });
 
-    // Model all of the frameworks.
-    writer->field("frameworks",
-                  [this,
-                   &slaveFrameworkMapping,
-                   &taskStateSummaries](JSON::ArrayWriter* writer) {
-      foreachpair (const FrameworkID& frameworkId,
-                   Framework* framework,
-                   master->frameworks.registered) {
-        writer->element([&frameworkId,
-                         &framework,
+          // Model all of the frameworks.
+          writer->field("frameworks",
+                        [this,
                          &slaveFrameworkMapping,
-                         &taskStateSummaries](JSON::ObjectWriter* writer) {
-          json(writer, Summary<Framework>(*framework));
+                         &taskStateSummaries,
+                         &masterView](
+                           JSON::ArrayWriter* writer) {
+            foreachpair (const FrameworkID& frameworkId,
+                         Framework* framework,
+                         master->frameworks.registered) {
+              // Skip unauthorized frameworks.
+              if (masterView.httpAuthorizationFiltering &&
+                  !masterView.authorizedFrameworkIds.contains(
+                      frameworkId)) {
+                continue;
+              }
 
-          // Add the 'TaskState' summary for this framework.
-          const TaskStateSummary& summary =
-            taskStateSummaries.framework(frameworkId);
+              writer->element([&frameworkId,
+                               &framework,
+                               &slaveFrameworkMapping,
+                               &taskStateSummaries](
+                                 JSON::ObjectWriter* writer) {
+                json(writer, Summary<Framework>(*framework));
 
-          writer->field("TASK_STAGING", summary.staging);
-          writer->field("TASK_STARTING", summary.starting);
-          writer->field("TASK_RUNNING", summary.running);
-          writer->field("TASK_KILLING", summary.killing);
-          writer->field("TASK_FINISHED", summary.finished);
-          writer->field("TASK_KILLED", summary.killed);
-          writer->field("TASK_FAILED", summary.failed);
-          writer->field("TASK_LOST", summary.lost);
-          writer->field("TASK_ERROR", summary.error);
+                // Add the 'TaskState' summary for this framework.
+                const TaskStateSummary& summary =
+                  taskStateSummaries.framework(frameworkId);
 
-          // Add the ids of all the slaves running this framework.
-          const hashset<SlaveID>& slaves =
-            slaveFrameworkMapping.slaves(frameworkId);
+                writer->field("TASK_STAGING", summary.staging);
+                writer->field("TASK_STARTING", summary.starting);
+                writer->field("TASK_RUNNING", summary.running);
+                writer->field("TASK_KILLING", summary.killing);
+                writer->field("TASK_FINISHED", summary.finished);
+                writer->field("TASK_KILLED", summary.killed);
+                writer->field("TASK_FAILED", summary.failed);
+                writer->field("TASK_LOST", summary.lost);
+                writer->field("TASK_ERROR", summary.error);
 
-          writer->field("slave_ids", [&slaves](JSON::ArrayWriter* writer) {
-            foreach (const SlaveID& slaveId, slaves) {
-              writer->element(slaveId.value());
+                // Add the ids of all the slaves running this framework.
+                const hashset<SlaveID>& slaves =
+                  slaveFrameworkMapping.slaves(frameworkId);
+
+                writer->field("slave_ids", [&slaves](
+                    JSON::ArrayWriter* writer) {
+                  foreach (const SlaveID& slaveId, slaves) {
+                    writer->element(slaveId.value());
+                  }
+                });
+              });
             }
           });
-        });
-      }
-    });
-  };
+        };
 
-  return OK(jsonify(stateSummary), request.url.query.get("jsonp"));
+        response->set(OK(jsonify(stateSummary),
+                      request.url.query.get("jsonp")));
+      });
+  return response->future();
 }
 
 
@@ -2824,6 +2888,75 @@ Future<Response> Master::Http::_operation(
     .repair([](const Future<Response>& result) {
        return Conflict(result.failure());
     });
+}
+
+// Creates authorized view of master datastructures.
+Future<Master::Http::AuthorizedMasterView>
+  Master::Http::createMasterViewStateSummary(
+    const Master* master,
+    const Option<string>& principal,
+    const bool httpAuthorizationFiltering) const
+{
+  std::shared_ptr<process::Promise<Master::Http::AuthorizedMasterView>> promise(
+      new process::Promise<Master::Http::AuthorizedMasterView>());
+
+  if (httpAuthorizationFiltering) {
+    list<FrameworkID> frameworkIds;
+    list<Future<bool>> authorizedFrameworks;
+
+    // Check all registered frameworks
+    foreachpair (const FrameworkID& frameworkId,
+                 Framework* framework,
+                 master->frameworks.registered) {
+        frameworkIds.emplace_back(frameworkId);
+        authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
+            principal,
+            framework->info));
+    }
+
+    collect(authorizedFrameworks).onAny([=](
+        const Future<list<bool>>& authorizedFrameworks) {
+      if (authorizedFrameworks.isReady()) {
+        AuthorizedMasterView masterView;
+        masterView.httpAuthorizationFiltering = true;
+
+        CHECK_EQ(frameworkIds.size(), authorizedFrameworks.get().size());
+
+        // We manually loop over both lists synchronously.
+        auto frameworksIterator = frameworkIds.begin();
+        auto boolIterator = authorizedFrameworks.get().begin();
+        for (; frameworksIterator != frameworkIds.end() &&
+            boolIterator != authorizedFrameworks.get().end();
+            ++frameworksIterator, ++boolIterator) {
+          if (*boolIterator) {
+            LOG(INFO) << "Authorized Framework for MasterView: "
+                      << *frameworksIterator;
+            masterView.authorizedFrameworkIds.insert(*frameworksIterator);
+          } else {
+            LOG(INFO) << "Unauthorized Framework for MasterView: "
+                      << *frameworksIterator;
+          }
+        }
+
+        promise->set(masterView);
+      } else {
+        if (authorizedFrameworks.isFailed()) {
+          promise->fail("Authorize Frameworks failed: Future failed");
+        }
+        else {
+          promise->fail("Authorize Frameworks failed: Future discarded");
+        }
+      }
+    });
+  } else {
+    // httpAuthorizationFiltering is disabled.
+    AuthorizedMasterView masterView;
+    masterView.httpAuthorizationFiltering = false;
+
+    promise->set(masterView);
+  }
+
+  return promise->future();
 }
 
 } // namespace master {
