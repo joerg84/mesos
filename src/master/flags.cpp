@@ -220,6 +220,13 @@ mesos::internal::master::Flags::Flags()
       "HTTP endpoints are also allowed.\n",
       false);
 
+  add(&Flags::endpoint_authorization_filtering,
+      "endpoint_authorization_filtering",
+      "If `true`, certain endpoints will be filtered based on principals\n"
+      "authorization and hence display only a subset of the overall\n"
+      "information.",
+      false);
+
   add(&Flags::authenticate_http_frameworks,
       "authenticate_http_frameworks",
       "If `true`, only authenticated HTTP frameworks are allowed to register.\n"

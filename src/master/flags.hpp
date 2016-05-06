@@ -67,6 +67,7 @@ public:
   bool authenticate_frameworks;
   bool authenticate_slaves;
   bool authenticate_http;
+  bool endpoint_authorization_filtering;
   bool authenticate_http_frameworks;
   Option<Path> credentials;
   Option<ACLs> acls;

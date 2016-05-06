@@ -14,6 +14,7 @@ Authorization currently allows
  5. Authorized _principals_ to reserve and unreserve resources through the "/reserve" and "/unreserve" HTTP endpoints, as well as with the `RESERVE` and `UNRESERVE` offer operations.
  6. Authorized _principals_ to create and destroy persistent volumes through the "/create-volumes" and "/destroy-volumes" HTTP endpoints, as well as with the `CREATE` and `DESTROY` offer operations.
  7. Authorized _principals_ to update weights through the "/weights" HTTP endpoint.
+ 8. Fine-grained filtering of "/state","/state-summary", and "/tasks" HTTP endpoint.
 
 
 ## ACLs
@@ -85,6 +86,19 @@ In a real-world organization, principals and roles might be used to represent va
 * The master looks through its ACLs to see if it has a `RegisterFramework` ACL which authorizes the principal `payroll-framework` to register with the `accounting` role. It does find such an ACL, so the framework registers successfully. Now that the framework belongs to the `accounting` role, any [weights](roles.md), [reservations](reservation.md), [persistent volumes](persistent-volume.md), or [quota](quota.md) associated with the accounting department's role will apply. This allows operators to control the resource consumption of this department.
 * Suppose the framework has created a persistent volume on a slave which it now wishes to destroy. The framework sends an `ACCEPT` call containing an offer operation which will `DESTROY` the persistent volume.
 * However, datacenter operators have decided that they don't want the accounting frameworks to delete volumes. Rather, the operators will manually remove the accounting department's persistent volumes to ensure that no important financial data is deleted accidentally. To accomplish this, they have set a `DestroyVolume` ACL which asserts that the principal `payroll-framework` can destroy volumes created by a `creator_principal` of `NONE`; in other words, this framework cannot destroy persistent volumes, so the operation will be refused.
+
+## Fine-Grained Authorization based filtering
+
+The `--endpoint_authorization_filtering` master flag enables fine-grained
+filtering of HTTP endpoints. This means that the filtered HTTP endpoints
+(currently `/state`,`/state-summary`, and `/tasks`) only contain information
+the user is authorized to view e.g., the user might only see a subset of the
+frameworks running in the cluster.
+Currently frameworks and tasks are filtered.
+* The visible frameworks can be controlled via the "view_frameworks" acl, which
+sets `roles` in which the user is authorized to view frameworks.
+* The visible task can be controlled via the "view_tasks" acl, which
+sets OS `users` whose tasks the user is authorized to view.
 
 
 ## Examples

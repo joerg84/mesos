@@ -145,7 +145,16 @@ module using <code>--modules</code>. This must be used in conjunction with
 Currently there is no support for multiple HTTP authenticators.
   </td>
 </tr>
-
+<tr>
+  <td>
+    --[no-]endpoint_authorization_filtering
+  </td>
+  <td>
+If `true`, certain endpoints will be filtered based on principals
+authorization and hence display only a subset of the overall information.
+See Authorization documentation for more details. (default: false)
+  </td>
+</tr>
 <tr>
   <td>
     --ip=VALUE
