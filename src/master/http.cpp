@@ -3233,21 +3233,36 @@ Future<Master::Http::AuthorizedMasterView>
   std::shared_ptr<process::Promise<Master::Http::AuthorizedMasterView>> promise(
       new process::Promise<Master::Http::AuthorizedMasterView>());
 
-  if (httpAuthorizationFiltering) {
+  if (httpAuthorizationFiltering && master->authorizer.isSome()) {
     list<FrameworkID> frameworkIds;
-    list<Future<bool>> authorizedFrameworks;
+    list<authorization::Request> requests;
+
+    // Create a base request with subject and action.
+    authorization::Request baseRequest;
+    baseRequest.set_action(authorization::VIEW_FRAMEWORK_WITH_INFO);
+
+    if (principal.isSome()) {
+      baseRequest.mutable_subject()->set_value(principal.get());
+    }
 
     // Check all registered frameworks
     foreachpair (const FrameworkID& frameworkId,
                  Framework* framework,
                  master->frameworks.registered) {
         frameworkIds.emplace_back(frameworkId);
-        authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
-            principal,
-            framework->info));
+
+        authorization::Request request(baseRequest);
+
+        string object;
+        if (!framework->info.SerializeToString(&object)) {
+          // Error.
+        }
+        request.mutable_object()->set_value(object);
+
+        requests.emplace_back(request);
     }
 
-    collect(authorizedFrameworks).onAny([=](
+    master->authorizer.get()->authorized(requests).onAny([=](
         const Future<list<bool>>& authorizedFrameworks) {
       if (authorizedFrameworks.isReady()) {
         AuthorizedMasterView masterView;
@@ -3310,7 +3325,7 @@ Future<Master::Http::AuthorizedMasterView> Master::Http::createMasterViewState(
   std::shared_ptr<process::Promise<Master::Http::AuthorizedMasterView>> promise(
       new process::Promise<Master::Http::AuthorizedMasterView>());
 
-  if (httpAuthorizationFiltering) {
+  if (httpAuthorizationFiltering && master->authorizer.isSome()) {
     list<FrameworkID> frameworkIds;
     list<Future<bool>> authorizedFrameworks;
     list<ExecutorID> executorIds;
@@ -3318,16 +3333,36 @@ Future<Master::Http::AuthorizedMasterView> Master::Http::createMasterViewState(
     list<TaskID> taskIds;
     list<Future<bool>> authorizedTasks;
 
+    list<authorization::Request> frameworkRequests;
+    list<authorization::Request> executorRequests;
+    list<authorization::Request> taskRequests;
 
-    // Check registered frameworks.
+    // Create a base request with subject and action.
+    authorization::Request baseRequest;
+
+
+    if (principal.isSome()) {
+      baseRequest.mutable_subject()->set_value(principal.get());
+    }
+
+    // Check all registered frameworks
+    baseRequest.set_action(authorization::VIEW_FRAMEWORK_WITH_INFO);
     foreachpair (const FrameworkID& frameworkId,
                  Framework* framework,
                  master->frameworks.registered) {
-      // Check framework authorization.
-      frameworkIds.emplace_back(frameworkId);
-      authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
-          principal,
-          framework->info));
+        frameworkIds.emplace_back(frameworkId);
+
+        authorization::Request request(baseRequest);
+
+        string object;
+        if (!framework->info.SerializeToString(&object)) {
+          // Error.
+        }
+        request.mutable_object()->set_value(object);
+
+        frameworkRequests.emplace_back(request);
+
+
 
       // Check non-executor tasks authorization.
       // NOTE: This is done irrespective of the authorization of the overall
@@ -3341,10 +3376,32 @@ Future<Master::Http::AuthorizedMasterView> Master::Http::createMasterViewState(
         }
 
         taskIds.emplace_back(taskInfo.task_id());
-        authorizedTasks.emplace_back(Master::Http::authorizeTaskInfo(
-          principal,
-          taskInfo));
+
+        authorization::Request request(baseRequest);
+        //  Either ExecutorInfo or CommandInfo should be set.
+        if (taskInfo.has_executor()) {
+          request.set_action(authorization::VIEW_TASK_WITH_EXECUTOR_INFO);
+
+          string object;
+          if (!taskInfo.executor().SerializeToString(&object)) {
+            // Error.
+          }
+          request.mutable_object()->set_value(object);
+        }
+        else { // CommandInfo.
+          request.set_action(authorization::VIEW_TASK_WITH_COMMAND_INFO);
+
+          string object;
+          if (!taskInfo.command().SerializeToString(&object)) {
+            // Error.
+          }
+          request.mutable_object()->set_value(object);
+        }
+        taskRequests.emplace_back(request);
       }
+
+      // Set action of base task.
+      baseRequest.set_action(authorization::VIEW_TASK_WITH_TASK);
 
       // Check running Tasks.
       foreachvalue (Task* task, framework->tasks) {
@@ -3353,10 +3410,15 @@ Future<Master::Http::AuthorizedMasterView> Master::Http::createMasterViewState(
           continue;
         }
 
-        taskIds.emplace_back(task->task_id());
-        authorizedTasks.emplace_back(Master::Http::authorizeTask(
-          principal,
-          *task));
+        authorization::Request request(baseRequest);
+
+        string object;
+        if (!task->SerializeToString(&object)) {
+          // Error.
+        }
+        request.mutable_object()->set_value(object);
+
+        taskRequests.emplace_back(request);
       }
 
       // Check completed Tasks.
@@ -3366,89 +3428,109 @@ Future<Master::Http::AuthorizedMasterView> Master::Http::createMasterViewState(
           continue;
         }
 
-        taskIds.emplace_back(task->task_id());
-        authorizedTasks.emplace_back(Master::Http::authorizeTask(
-          principal,
-          *task));
+        authorization::Request request(baseRequest);
+
+        string object;
+        if (!task->SerializeToString(&object)) {
+          // Error.
+        }
+        request.mutable_object()->set_value(object);
+
+        taskRequests.emplace_back(request);
       }
 
+
       // Check executors.
+      baseRequest.set_action(authorization::VIEW_TASK_WITH_EXECUTOR_INFO);
+
       foreachvalue (const auto& executorsMap, framework->executors) {
         foreachvalue (const ExecutorInfo& executor, executorsMap) {
           executorIds.emplace_back(executor.executor_id());
-          authorizedExecutors.emplace_back(Master::Http::authorizeExecutorInfo(
-            principal,
-            executor));
+
+            authorization::Request request(baseRequest);
+
+            string object;
+            if (!executor.SerializeToString(&object)) {
+              // Error.
+            }
+            request.mutable_object()->set_value(object);
+
+            executorRequests.emplace_back(request);
         }
       }
     }
 
-    // Check completed frameworks.
-    foreach (const std::shared_ptr<Framework>& framework,
-                       master->frameworks.completed) {
-      frameworkIds.emplace_back(framework->info.id());
-      authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
-          principal,
-          framework->info));
+    // TODO(joerg84): Do the same here....
 
-      // Check non-executor tasks authorization.
-      // NOTE: This is done irrespective of the authorization of the overall
-      // framework in order to decouple both authorization steps.
+    // // Check completed frameworks.
+    // foreach (const std::shared_ptr<Framework>& framework,
+    //                    master->frameworks.completed) {
+    //   frameworkIds.emplace_back(framework->info.id());
+    //   authorizedFrameworks.emplace_back(Master::Http::authorizeFrameworkInfo(
+    //       principal,
+    //       framework->info));
 
-      // Pending Tasks.
-      foreachvalue (const TaskInfo& taskInfo, framework->pendingTasks) {
-        // Tasks with ExecutorInfo are authorized via the ExecutorInfo.
-        if (taskInfo.has_executor()) {
-          continue;
-        }
+    //   // Check non-executor tasks authorization.
+    //   // NOTE: This is done irrespective of the authorization of the overall
+    //   // framework in order to decouple both authorization steps.
 
-        taskIds.emplace_back(taskInfo.task_id());
-        authorizedTasks.emplace_back(Master::Http::authorizeTaskInfo(
-          principal,
-          taskInfo));
-      }
+    //   // Pending Tasks.
+    //   foreachvalue (const TaskInfo& taskInfo, framework->pendingTasks) {
+    //     // Tasks with ExecutorInfo are authorized via the ExecutorInfo.
+    //     if (taskInfo.has_executor()) {
+    //       continue;
+    //     }
 
-      // Running Tasks
-      foreachvalue (Task* task, framework->tasks) {
-         // Tasks with executors are authorized via the ExecutorInfo.
-        if (task->has_executor_id()) {
-          continue;
-        }
+    //     taskIds.emplace_back(taskInfo.task_id());
+    //     authorizedTasks.emplace_back(Master::Http::authorizeTaskInfo(
+    //       principal,
+    //       taskInfo));
+    //   }
 
-        taskIds.emplace_back(task->task_id());
-        authorizedTasks.emplace_back(Master::Http::authorizeTask(
-          principal,
-          *task));
-      }
+    //   // Running Tasks
+    //   foreachvalue (Task* task, framework->tasks) {
+    //      // Tasks with executors are authorized via the ExecutorInfo.
+    //     if (task->has_executor_id()) {
+    //       continue;
+    //     }
 
-      // Completed Tasks
-      foreach (const std::shared_ptr<Task>& task, framework->completedTasks) {
-         // Tasks with executors are authorized via the ExecutorInfo.
-        if (task->has_executor_id()) {
-          continue;
-        }
+    //     taskIds.emplace_back(task->task_id());
+    //     authorizedTasks.emplace_back(Master::Http::authorizeTask(
+    //       principal,
+    //       *task));
+    //   }
 
-        taskIds.emplace_back(task->task_id());
-        authorizedTasks.emplace_back(Master::Http::authorizeTask(
-          principal,
-          *task));
-      }
+    //   // Completed Tasks
+    //  foreach (const std::shared_ptr<Task>& task, framework->completedTasks) {
+    //      // Tasks with executors are authorized via the ExecutorInfo.
+    //     if (task->has_executor_id()) {
+    //       continue;
+    //     }
 
-      // Check executors.
-      foreachvalue (const auto& executorsMap, framework->executors) {
-        foreachvalue (const ExecutorInfo& executor, executorsMap) {
-          executorIds.emplace_back(executor.executor_id());
-          authorizedTasks.emplace_back(Master::Http::authorizeExecutorInfo(
-            principal,
-            executor));
-        }
-      }
-    }
+    //     taskIds.emplace_back(task->task_id());
+    //     authorizedTasks.emplace_back(Master::Http::authorizeTask(
+    //       principal,
+    //       *task));
+    //   }
+
+    //   // Check executors.
+    //   foreachvalue (const auto& executorsMap, framework->executors) {
+    //     foreachvalue (const ExecutorInfo& executor, executorsMap) {
+    //       executorIds.emplace_back(executor.executor_id());
+    //       authorizedTasks.emplace_back(Master::Http::authorizeExecutorInfo(
+    //         principal,
+    //         executor));
+    //     }
+    //   }
+    // }
 
     list<Future<list<bool>>> authorizedEntities;
-    authorizedEntities.emplace_back(collect(authorizedFrameworks));
-    authorizedEntities.emplace_back(collect(authorizedExecutors));
-    authorizedEntities.emplace_back(collect(authorizedTasks));
+    authorizedEntities.emplace_back(
+        master->authorizer.get()->authorized(frameworkRequests));
+    authorizedEntities.emplace_back(
+        master->authorizer.get()->authorized(executorRequests));
+    authorizedEntities.emplace_back(
+        master->authorizer.get()->authorized(taskRequests));
 
     collect(authorizedEntities).onAny([=](
         const Future<list<list<bool>>>& authorizedEntities) {

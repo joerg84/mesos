@@ -46,6 +46,7 @@
 #include <mesos/slave/qos_controller.hpp>
 #include <mesos/slave/resource_estimator.hpp>
 
+#include <process/collect.hpp>
 #include <process/future.hpp>
 #include <process/gmock.hpp>
 #include <process/gtest.hpp>
@@ -1686,14 +1687,14 @@ public:
   MOCK_METHOD1(
       authorized, process::Future<bool>(const authorization::Request& request));
 
-  std::list<process::Future<bool>> authorized(
+  process::Future<std::list<bool>> authorized(
       const std::list<authorization::Request>& requests)
   {
-    process::Future<std::list<bool>> results;
+    std::list<process::Future<bool>>  results;
     foreach (const authorization::Request& request, requests) {
       results.emplace_back(authorized(request));
     }
-    return results;
+    return process::collect(results);
   }
 };
 
