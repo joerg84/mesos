@@ -16,12 +16,14 @@
 
 #include "authorizer/local/authorizer.hpp"
 
+#include <list>
 #include <string>
 #include <vector>
 
 #include <mesos/mesos.hpp>
 #include <mesos/authorizer/acls.hpp>
 
+#include <process/collect.hpp>
 #include <process/dispatch.hpp>
 #include <process/future.hpp>
 #include <process/id.hpp>
@@ -40,6 +42,7 @@ using process::Failure;
 using process::Future;
 using process::dispatch;
 
+using std::list;
 using std::string;
 using std::vector;
 
@@ -243,6 +246,15 @@ public:
         break;
     }
     UNREACHABLE();
+  }
+
+  Future<list<bool>> authorized(const list<authorization::Request>& requests)
+  {
+    list<Future<bool>> results;
+    foreach (const authorization::Request& request, requests) {
+      results.emplace_back(authorized(request));
+    }
+    return collect(results);
   }
 
 private:
@@ -505,6 +517,18 @@ process::Future<bool> LocalAuthorizer::authorized(
       process,
       static_cast<F>(&LocalAuthorizerProcess::authorized),
       request);
+}
+
+process::Future<list<bool>> LocalAuthorizer::authorized(
+  const list<authorization::Request>& requests)
+{
+  typedef Future<list<bool>> (LocalAuthorizerProcess::*F)(
+      const list<authorization::Request>&);
+
+  return dispatch(
+      process,
+      static_cast<F>(&LocalAuthorizerProcess::authorized),
+      requests);
 }
 
 } // namespace internal {

@@ -17,6 +17,7 @@
 #ifndef __TESTS_MESOS_HPP__
 #define __TESTS_MESOS_HPP__
 
+#include <list>
 #include <map>
 #include <memory>
 #include <set>
@@ -1684,6 +1685,16 @@ public:
 
   MOCK_METHOD1(
       authorized, process::Future<bool>(const authorization::Request& request));
+
+  std::list<process::Future<bool>> authorized(
+      const std::list<authorization::Request>& requests)
+  {
+    process::Future<std::list<bool>> results;
+    foreach (const authorization::Request& request, requests) {
+      results.emplace_back(authorized(request));
+    }
+    return results;
+  }
 };
 
 

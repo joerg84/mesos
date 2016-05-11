@@ -17,6 +17,8 @@
 #ifndef __MESOS_AUTHORIZER_AUTHORIZER_HPP__
 #define __MESOS_AUTHORIZER_AUTHORIZER_HPP__
 
+#include <list>
+
 #include <mesos/mesos.hpp>
 
 // ONLY USEFUL AFTER RUNNING PROTOC.
@@ -93,6 +95,9 @@ public:
    */
   virtual process::Future<bool> authorized(
       const authorization::Request& request) = 0;
+
+  virtual process::Future<std::list<bool>> authorized(
+      const std::list<authorization::Request>& requests) = 0;
 
 protected:
   Authorizer() {}

@@ -17,6 +17,8 @@
 #ifndef __AUTHORIZER_AUTHORIZER_HPP__
 #define __AUTHORIZER_AUTHORIZER_HPP__
 
+#include <list>
+
 #include <mesos/authorizer/authorizer.hpp>
 
 #include <process/future.hpp>
@@ -63,6 +65,9 @@ public:
 
   virtual process::Future<bool> authorized(
       const authorization::Request& request);
+
+  virtual process::Future<std::list<bool>> authorized(
+      const std::list<authorization::Request>& requests);
 
 private:
   LocalAuthorizer(const ACLs& acls);
