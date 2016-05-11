@@ -211,9 +211,9 @@ static void json(JSON::ObjectWriter* writer, const Summary<Framework>& summary)
 
 // Writes a filtering version of Full<Framework> based on master filter.
 struct FrameworkWriter {
-  FrameworkWriter(const Master::Http::AuthorizedMasterView& _masterView,
+  FrameworkWriter(const Owned<Master::Http::Filter>& _filter,
       const Full<Framework>& _fwk) :
-  masterView(_masterView), fwk(_fwk) {}
+  filter(_filter), fwk(_fwk) {}
 
   void operator()(JSON::ObjectWriter* writer) const {
       const Framework& framework = fwk;
@@ -248,8 +248,7 @@ struct FrameworkWriter {
     writer->field("tasks", [this, &framework](JSON::ArrayWriter* writer) {
       foreachvalue (const TaskInfo& taskInfo, framework.pendingTasks) {
         // Skip unauthorized tasks.
-        if (masterView.httpAuthorizationFiltering &&
-            !masterView.authorizedTaskIds.contains(taskInfo.task_id())) {
+        if (!filter->filter(taskInfo)) {
           continue;
         }
 
@@ -283,8 +282,7 @@ struct FrameworkWriter {
 
       foreachvalue (Task* task, framework.tasks) {
         // Skip unauthorized tasks.
-        if (masterView.httpAuthorizationFiltering &&
-            !masterView.authorizedTaskIds.contains(task->task_id())) {
+        if (!filter->filter(*task)) {
           continue;
         }
         writer->element(*task);
@@ -295,8 +293,7 @@ struct FrameworkWriter {
         JSON::ArrayWriter* writer) {
       foreach (const std::shared_ptr<Task>& task, framework.completedTasks) {
         // Skip unauthorized tasks.
-        if (masterView.httpAuthorizationFiltering &&
-            !masterView.authorizedTaskIds.contains(task->task_id())) {
+        if (!filter->filter(*task)) {
           continue;
         }
 
@@ -321,9 +318,7 @@ struct FrameworkWriter {
           writer->element([this, &executor, &slaveId](
               JSON::ObjectWriter* writer) {
             // Skip unauthorized executors.
-            if (masterView.httpAuthorizationFiltering &&
-                !masterView.authorizedExecutorIds.contains(
-                    executor.executor_id())) {
+            if (!filter->filter(executor)) {
               return;
             }
 
@@ -340,7 +335,7 @@ struct FrameworkWriter {
     }
   }
 
-  const Master::Http::AuthorizedMasterView &masterView;
+  const Owned<Master::Http::Filter> &filter;
   const Full<Framework> &fwk;
 };
 
@@ -1585,29 +1580,39 @@ Future<Response> Master::Http::state(
     return redirect(request);
   }
 
-  // Check whether fine-grained authorization based filtering is requried.
-  bool httpAuthorizationFiltering =
-    master->flags.endpoint_authorization_filtering;
+  // TODO(joerg84): Get filter from authorizer
+  // (e.g., authorizer.getFilter(VIEW_FRAMEWORKS);)
+  Future<Owned<Filter>> frameworksFilter = Owned<Filter>(new Filter());
+  Future<Owned<Filter>> executorsFilter = Owned<Filter>(new Filter());
+  Future<Owned<Filter>> tasksFilter = Owned<Filter>(new Filter());
 
-  // Generate authorized view of master datastructures.
-  Future<AuthorizedMasterView> masterViewFuture =
-    createMasterViewState(master, principal, httpAuthorizationFiltering);
+  list<Future<Owned<Filter>>> filterList;
+  filterList.emplace_back(frameworksFilter);
+  filterList.emplace_back(executorsFilter);
+  filterList.emplace_back(tasksFilter);
 
   std::shared_ptr<process::Promise<Response>> response(
       new process::Promise<Response>());
 
-  masterViewFuture.onAny(
-      [=](const Future<AuthorizedMasterView> masterViewFuture) {
-          if (!masterViewFuture.isReady()) {
+  collect(filterList).onAny(
+      [=](const Future<list<Owned<Filter>>>& filterLists) {
+          if (!filterLists.isReady()) {
             LOG(WARNING) << "Authorization for failed MasterView failed";
             response->set(InternalServerError("Error during Authorization"));
             return;
           }
 
-          AuthorizedMasterView masterView = masterViewFuture.get();
-
-        auto state = [this, &masterView](
+        auto state = [this, &filterLists](
             JSON::ObjectWriter* writer) {
+          // Get filter from list.
+          CHECK_EQ(filterLists.get().size(), 3u);
+          auto filterIterator = filterLists.get().begin();
+          Owned<Filter> frameworksFilter  = *filterIterator;
+          ++filterIterator;
+          Owned<Filter> executorsFilter  = *filterIterator;
+          ++filterIterator;
+          Owned<Filter> tasksFilter  = *filterIterator;
+
           writer->field("version", MESOS_VERSION);
 
           if (build::GIT_SHA.isSome()) {
@@ -1672,36 +1677,31 @@ Future<Response> Master::Http::state(
           });
 
           // Model all of the frameworks.
-          writer->field("frameworks", [this,  &masterView](
+          writer->field("frameworks", [this, &tasksFilter, &frameworksFilter](
                   JSON::ArrayWriter* writer) {
-            foreachpair (const FrameworkID& frameworkId,
-                         Framework* framework,
-                         master->frameworks.registered) {
+            foreachvalue (Framework* framework, master->frameworks.registered) {
               // Skip unauthorized frameworks.
-              if (masterView.httpAuthorizationFiltering &&
-                  !masterView.authorizedFrameworkIds.contains(
-                      frameworkId)) {
+              if (!frameworksFilter->filter(framework->info)) {
                 continue;
               }
-              auto fwkWriter = FrameworkWriter(masterView,
-                  Full<Framework>(*framework));
+              auto fwkWriter = FrameworkWriter(tasksFilter,
+                   Full<Framework>(*framework));
 
               writer->element(fwkWriter);
             }
           });
 
           // Model all of the completed frameworks.
-          writer->field("completed_frameworks", [this, &masterView](
-              JSON::ArrayWriter* writer) {
+          writer->field("completed_frameworks",
+              [this, &frameworksFilter, &tasksFilter](
+                  JSON::ArrayWriter* writer) {
             foreach (const std::shared_ptr<Framework>& framework,
                      master->frameworks.completed) {
               // Skip unauthorized frameworks.
-              if (masterView.httpAuthorizationFiltering &&
-                  !masterView.authorizedFrameworkIds.contains(
-                      framework->info.id())) {
-              continue;
+              if (!frameworksFilter->filter(framework->info)) {
+                continue;
               }
-              auto fwkWriter = FrameworkWriter(masterView,
+              auto fwkWriter = FrameworkWriter(tasksFilter,
                   Full<Framework>(*framework));
 
               writer->element(fwkWriter);
@@ -1709,7 +1709,7 @@ Future<Response> Master::Http::state(
           });
 
           // Model all of the orphan tasks.
-          writer->field("orphan_tasks", [this, &masterView](
+          writer->field("orphan_tasks", [this](
               JSON::ArrayWriter* writer) {
             // Find those orphan tasks.
             foreachvalue (const Slave* slave, master->slaves.registered) {
@@ -1719,13 +1719,6 @@ Future<Response> Master::Http::state(
                   CHECK_NOTNULL(task);
                   if (!master->frameworks.registered.contains(
                       task->framework_id())) {
-                    // Skip unauthorized frameworks.
-                    // TODO(joerg84): Discuss filtering on taskID in this case.
-                    if (masterView.httpAuthorizationFiltering &&
-                        !masterView.authorizedFrameworkIds.contains(
-                          task->framework_id())) {
-                      continue;
-                    }
                     writer->element(*task);
                   }
                 }
@@ -1735,19 +1728,12 @@ Future<Response> Master::Http::state(
 
           // Model all currently unregistered frameworks. This can happen
           // when a framework has yet to re-register after master failover.
-          writer->field("unregistered_frameworks", [this, &masterView](
+          writer->field("unregistered_frameworks", [this](
               JSON::ArrayWriter* writer) {
             // Find unregistered frameworks.
             foreachvalue (const Slave* slave, master->slaves.registered) {
               foreachkey (const FrameworkID& frameworkId, slave->tasks) {
                 if (!master->frameworks.registered.contains(frameworkId)) {
-                  // Skip unauthorized frameworks.
-                  // TODO(joerg84): Dicuss whether filtering is needed here.
-                  if (masterView.httpAuthorizationFiltering &&
-                      !masterView.authorizedFrameworkIds.contains(
-                        frameworkId)) {
-                    continue;
-                  }
                   writer->element(frameworkId.value());
                 }
               }
@@ -2042,26 +2028,32 @@ Future<Response> Master::Http::stateSummary(
     return redirect(request);
   }
 
-  bool httpAuthorizationFiltering =
-    master->flags.endpoint_authorization_filtering;
+  // TODO(joerg84): Get filter from authorizer
+  // (e.g., authorizer.getFilter(VIEW_FRAMEWORKS);)
+  Future<Owned<Filter>> frameworksFilter = Owned<Filter>(new Filter());
 
-  // Generate authorized view of master datastructures.
-  Future<AuthorizedMasterView> masterViewFuture =
-    createMasterViewStateSummary(master, principal, httpAuthorizationFiltering);
+  list<Future<Owned<Filter>>> filterList;
+  filterList.emplace_back(frameworksFilter);
+
 
   std::shared_ptr<process::Promise<Response>> response(
       new process::Promise<Response>());
 
-  masterViewFuture.onAny(
-      [=](const Future<AuthorizedMasterView> masterViewFuture) {
-        if (!masterViewFuture.isReady()) {
-          response->set(InternalServerError("Error during Authorization"));
-          return;
-        }
-        AuthorizedMasterView masterView = masterViewFuture.get();
+  collect(filterList).onAny(
+      [=](const Future<list<Owned<Filter>>>& filterLists) {
+          if (!filterLists.isReady()) {
+            LOG(WARNING) << "Authorization for failed MasterView failed";
+            response->set(InternalServerError("Error during Authorization"));
+            return;
+          }
 
-        auto stateSummary = [this, &masterView](
+
+        auto stateSummary = [this, &filterLists](
             JSON::ObjectWriter* writer) {
+          // Get filter from list
+          CHECK_EQ(filterLists.get().size(), 1u);
+          Owned<Filter> frameworksFilter  = *filterLists.get().begin();
+
           writer->field("hostname", master->info().hostname());
 
           if (master->flags.cluster.isSome()) {
@@ -2128,17 +2120,16 @@ Future<Response> Master::Http::stateSummary(
                         [this,
                          &slaveFrameworkMapping,
                          &taskStateSummaries,
-                         &masterView](
+                         &frameworksFilter](
                            JSON::ArrayWriter* writer) {
             foreachpair (const FrameworkID& frameworkId,
                          Framework* framework,
                          master->frameworks.registered) {
               // Skip unauthorized frameworks.
-              if (masterView.httpAuthorizationFiltering &&
-                  !masterView.authorizedFrameworkIds.contains(
-                      frameworkId)) {
+              if (!frameworksFilter->filter(framework->info)) {
                 continue;
               }
+
 
               writer->element([&frameworkId,
                                &framework,
@@ -2489,100 +2480,100 @@ Future<Response> Master::Http::tasks(
   std::shared_ptr<process::Promise<Response>> response(
       new process::Promise<Response>());
 
-  masterViewFuture.onAny(
-      [=](const Future<AuthorizedMasterView> masterViewFuture) {
-          if (!masterViewFuture.isReady()) {
-            response->set(InternalServerError("Error during Authorization"));
-            return;
-          }
+  // masterViewFuture.onAny(
+  //     [=](const Future<AuthorizedMasterView> masterViewFuture) {
+  //         if (!masterViewFuture.isReady()) {
+  //           response->set(InternalServerError("Error during Authorization"));
+  //           return;
+  //         }
 
-          AuthorizedMasterView masterView = masterViewFuture.get();
+  //         AuthorizedMasterView masterView = masterViewFuture.get();
 
-          // Get list options (limit and offset).
-          Result<int> result = numify<int>(request.url.query.get("limit"));
-          size_t limit = result.isSome() ? result.get() : TASK_LIMIT;
+  //         // Get list options (limit and offset).
+  //         Result<int> result = numify<int>(request.url.query.get("limit"));
+  //         size_t limit = result.isSome() ? result.get() : TASK_LIMIT;
 
-          result = numify<int>(request.url.query.get("offset"));
-          size_t offset = result.isSome() ? result.get() : 0;
+  //         result = numify<int>(request.url.query.get("offset"));
+  //         size_t offset = result.isSome() ? result.get() : 0;
 
-          // TODO(nnielsen): Currently, formatting errors in offset and/or limit
-          // will silently be ignored. This could be reported to the user
-          // instead.
+  //      // TODO(nnielsen): Currently, formatting errors in offset and/or limit
+  //         // will silently be ignored. This could be reported to the user
+  //         // instead.
 
-          // Construct framework list with both active and completed frameworks.
-          vector<const Framework*> frameworks;
-          foreachpair (const FrameworkID& frameworkId,
-                       Framework* framework,
-                       master->frameworks.registered) {
-            // Skip unauthorized frameworks.
-            if (masterView.httpAuthorizationFiltering &&
-                !masterView.authorizedFrameworkIds.contains(
-                    frameworkId)) {
-              continue;
-            }
-            frameworks.push_back(framework);
-          }
-          foreach (const std::shared_ptr<Framework>& framework,
-                   master->frameworks.completed) {
-            // Skip unauthorized frameworks.
-            if (masterView.httpAuthorizationFiltering &&
-                !masterView.authorizedFrameworkIds.contains(
-                    framework->id())) {
-              continue;
-            }
-            frameworks.push_back(framework.get());
-          }
+  //      // Construct framework list with both active and completed frameworks.
+  //         vector<const Framework*> frameworks;
+  //         foreachpair (const FrameworkID& frameworkId,
+  //                      Framework* framework,
+  //                      master->frameworks.registered) {
+  //           // Skip unauthorized frameworks.
+  //           if (masterView.httpAuthorizationFiltering &&
+  //               !masterView.authorizedFrameworkIds.contains(
+  //                   frameworkId)) {
+  //             continue;
+  //           }
+  //           frameworks.push_back(framework);
+  //         }
+  //         foreach (const std::shared_ptr<Framework>& framework,
+  //                  master->frameworks.completed) {
+  //           // Skip unauthorized frameworks.
+  //           if (masterView.httpAuthorizationFiltering &&
+  //               !masterView.authorizedFrameworkIds.contains(
+  //                   framework->id())) {
+  //             continue;
+  //           }
+  //           frameworks.push_back(framework.get());
+  //         }
 
-          // Construct task list with both running and finished tasks.
-          vector<const Task*> tasks;
-          foreach (const Framework* framework, frameworks) {
-            foreachvalue (Task* task, framework->tasks) {
-              CHECK_NOTNULL(task);
-              // Skip unauthorized tasks.
-              if (masterView.httpAuthorizationFiltering &&
-                !masterView.authorizedTaskIds.contains(
-                    task->task_id())) {
-                continue;
-              }
-              tasks.push_back(task);
-            }
-            foreach (const std::shared_ptr<Task>& task,
-                     framework->completedTasks) {
-              // Skip unauthorized tasks.
-              if (masterView.httpAuthorizationFiltering &&
-                !masterView.authorizedTaskIds.contains(
-                    task->task_id())) {
-                continue;
-              }
-              tasks.push_back(task.get());
-            }
-          }
+  //         // Construct task list with both running and finished tasks.
+  //         vector<const Task*> tasks;
+  //         foreach (const Framework* framework, frameworks) {
+  //           foreachvalue (Task* task, framework->tasks) {
+  //             CHECK_NOTNULL(task);
+  //             // Skip unauthorized tasks.
+  //             if (masterView.httpAuthorizationFiltering &&
+  //               !masterView.authorizedTaskIds.contains(
+  //                   task->task_id())) {
+  //               continue;
+  //             }
+  //             tasks.push_back(task);
+  //           }
+  //           foreach (const std::shared_ptr<Task>& task,
+  //                    framework->completedTasks) {
+  //             // Skip unauthorized tasks.
+  //             if (masterView.httpAuthorizationFiltering &&
+  //               !masterView.authorizedTaskIds.contains(
+  //                   task->task_id())) {
+  //               continue;
+  //             }
+  //             tasks.push_back(task.get());
+  //           }
+  //         }
 
-          // Sort tasks by task status timestamp. Default order is descending.
-          // The earliest timestamp is chosen for comparison when multiple are
-          // present.
-          Option<string> order = request.url.query.get("order");
-          if (order.isSome() && (order.get() == "asc")) {
-            sort(tasks.begin(), tasks.end(), TaskComparator::ascending);
-          } else {
-            sort(tasks.begin(), tasks.end(), TaskComparator::descending);
-          }
+  //         //Sort tasks by task status timestamp. Default order is descending.
+  //         //The earliest timestamp is chosen for comparison when multiple are
+  //         // present.
+  //         Option<string> order = request.url.query.get("order");
+  //         if (order.isSome() && (order.get() == "asc")) {
+  //           sort(tasks.begin(), tasks.end(), TaskComparator::ascending);
+  //         } else {
+  //           sort(tasks.begin(), tasks.end(), TaskComparator::descending);
+  //         }
 
-          auto tasksWriter = [&tasks, limit, offset](
-              JSON::ObjectWriter* writer) {
-            writer->field("tasks", [&tasks, limit, offset](
-                JSON::ArrayWriter* writer) {
-              size_t end = std::min(offset + limit, tasks.size());
-              for (size_t i = offset; i < end; i++) {
-                const Task* task = tasks[i];
-                writer->element(*task);
-              }
-            });
-          };
+  //         auto tasksWriter = [&tasks, limit, offset](
+  //             JSON::ObjectWriter* writer) {
+  //           writer->field("tasks", [&tasks, limit, offset](
+  //               JSON::ArrayWriter* writer) {
+  //             size_t end = std::min(offset + limit, tasks.size());
+  //             for (size_t i = offset; i < end; i++) {
+  //               const Task* task = tasks[i];
+  //               writer->element(*task);
+  //             }
+  //           });
+  //         };
 
-          response->set(OK(jsonify(tasksWriter),
-                        request.url.query.get("jsonp")));
-        });
+  //         response->set(OK(jsonify(tasksWriter),
+  //                       request.url.query.get("jsonp")));
+  //       });
         return response->future();
 }
 
@@ -3233,7 +3224,7 @@ Future<Master::Http::AuthorizedMasterView>
   std::shared_ptr<process::Promise<Master::Http::AuthorizedMasterView>> promise(
       new process::Promise<Master::Http::AuthorizedMasterView>());
 
-  if (httpAuthorizationFiltering) {
+  if (httpAuthorizationFiltering && master->authorizer.isSome()) {
     list<FrameworkID> frameworkIds;
     list<Future<bool>> authorizedFrameworks;
 

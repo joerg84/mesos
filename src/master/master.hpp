@@ -1213,6 +1213,27 @@ private:
       bool httpAuthorizationFiltering;
     };
 
+    class Filter
+    {
+    public:
+      bool filter (const FrameworkInfo&) const {
+        return true;
+      }
+
+      bool filter (const Task&) const {
+        return true;
+      }
+
+      bool filter (const TaskInfo&) const {
+        return true;
+      }
+
+      bool filter (const ExecutorInfo&) const {
+        return true;
+      }
+    };
+
+
     // Builder functions for creating a MasterView object for different
     // endpoints.
 
