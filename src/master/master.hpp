@@ -1200,6 +1200,27 @@ private:
     static std::string QUOTA_HELP();
     static std::string WEIGHTS_HELP();
 
+
+    class ObjectFilter
+    {
+    public:
+      bool filter (const FrameworkInfo&) const {
+        return true;
+      }
+
+      bool filter (const Task&) const {
+        return true;
+      }
+
+      bool filter (const TaskInfo&) const {
+        return true;
+      }
+
+      bool filter (const ExecutorInfo&) const {
+        return true;
+      }
+    };
+
   private:
     // Continuations.
     process::Future<process::http::Response> _flags(
@@ -1260,6 +1281,7 @@ private:
 
   friend struct Framework;
   friend struct Metrics;
+  friend struct FrameworkWriter;
 
   // NOTE: Since 'getOffer' and 'slaves' are protected,
   // we need to make the following functions friends.
