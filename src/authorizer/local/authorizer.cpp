@@ -216,6 +216,33 @@ public:
 
         return authorized(request, acls_);
         break;
+      // TODO(joerg84): Discuss whether to keep the Filter actions here or only
+      // allow them in the Filter interface (one issue is that in the filter
+      //  interface they support a fallback object.)
+      case authorization::FILTER_FRAMEWORK_WITH_INFO:
+        for (const ACL::ViewFrameworks& acl : acls.view_frameworks()) {
+          GenericACL acl_;
+          acl_.subjects = acl.principals();
+          acl_.objects = acl.user();
+
+          acls_.push_back(acl_);
+        }
+
+        return authorized(request, acls_);
+        break;
+      case authorization::FILTER_TASK_WITH_EXECUTOR_INFO:
+      case authorization::FILTER_TASK_WITH_COMMAND_INFO:
+      case authorization::FILTER_TASK_WITH_TASK:
+        for (const ACL::ViewTasks& acl : acls.view_tasks()) {
+          GenericACL acl_;
+          acl_.subjects = acl.principals();
+          acl_.objects = acl.user();
+
+          acls_.push_back(acl_);
+        }
+
+        return authorized(request, acls_);
+        break;
       case authorization::UNKNOWN:
         LOG(WARNING) << "Authorization request for action '" << request.action()
                      << "' is not defined and therefore not authorized";
