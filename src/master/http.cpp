@@ -212,7 +212,7 @@ static void json(JSON::ObjectWriter* writer, const Summary<Framework>& summary)
 
 // Writes a filtering version of Full<Framework> based on objectFilter.
 struct FrameworkWriter {
-  FrameworkWriter(const Owned<Master::Http::ObjectFilter>& _filter,
+  FrameworkWriter(const Owned<Master::Http::SampleObjectFilter>& _filter,
       const Framework* _fwk) :
   filter(_filter), fwk(_fwk) {}
 
@@ -334,7 +334,7 @@ struct FrameworkWriter {
     }
   }
 
-  const Owned<Master::Http::ObjectFilter> &filter;
+  const Owned<Master::Http::SampleObjectFilter> &filter;
   const Framework* fwk;
 };
 
@@ -1613,14 +1613,14 @@ Future<Response> Master::Http::state(
 
   // TODO(joerg84): Get filter from authorizer
   // (e.g., authorizer.getFilter(VIEW_FRAMEWORKS);)
-  Future<Owned<ObjectFilter>> frameworksFilter =
-    Owned<ObjectFilter>(new ObjectFilter());
-  Future<Owned<ObjectFilter>> executorsFilter =
-    Owned<ObjectFilter>(new ObjectFilter());
-  Future<Owned<ObjectFilter>> tasksFilter =
-    Owned<ObjectFilter>(new ObjectFilter());
+  Future<Owned<SampleObjectFilter>> frameworksFilter =
+    Owned<SampleObjectFilter>(new SampleObjectFilter());
+  Future<Owned<SampleObjectFilter>> executorsFilter =
+    Owned<SampleObjectFilter>(new SampleObjectFilter());
+  Future<Owned<SampleObjectFilter>> tasksFilter =
+    Owned<SampleObjectFilter>(new SampleObjectFilter());
 
-  list<Future<Owned<ObjectFilter>>> filterList;
+  list<Future<Owned<SampleObjectFilter>>> filterList;
   filterList.emplace_back(frameworksFilter);
   filterList.emplace_back(executorsFilter);
   filterList.emplace_back(tasksFilter);
@@ -1629,7 +1629,7 @@ Future<Response> Master::Http::state(
       new process::Promise<Response>());
 
   collect(filterList).onAny(
-    [=](const Future<list<Owned<ObjectFilter>>>& filterLists) {
+    [=](const Future<list<Owned<SampleObjectFilter>>>& filterLists) {
         if (!filterLists.isReady()) {
           LOG(WARNING) << "Authorization for failed MasterView failed";
           response->set(InternalServerError("Error during Authorization"));
@@ -1640,11 +1640,11 @@ Future<Response> Master::Http::state(
       // Get filter from list.
       CHECK_EQ(filterLists.get().size(), 3u);
       auto filterIterator = filterLists.get().begin();
-      Owned<ObjectFilter> frameworksFilter  = *filterIterator;
+      Owned<SampleObjectFilter> frameworksFilter  = *filterIterator;
       ++filterIterator;
-      Owned<ObjectFilter> executorsFilter  = *filterIterator;
+      Owned<SampleObjectFilter> executorsFilter  = *filterIterator;
       ++filterIterator;
-      Owned<ObjectFilter> tasksFilter  = *filterIterator;
+      Owned<SampleObjectFilter> tasksFilter  = *filterIterator;
 
       writer->field("version", MESOS_VERSION);
 

@@ -1201,22 +1201,22 @@ private:
     static std::string WEIGHTS_HELP();
 
 
-    class ObjectFilter
+    class SampleObjectFilter : ObjectFilter
     {
     public:
-      bool filter (const FrameworkInfo&) const {
+      virtual bool filter (const FrameworkInfo&) const noexcept override {
         return true;
       }
 
-      bool filter (const Task&) const {
+      bool filter (const Task&) const noexcept {
         return true;
       }
 
-      bool filter (const TaskInfo&) const {
+      virtual bool filter (const TaskInfo&) const noexcept override {
         return true;
       }
 
-      bool filter (const ExecutorInfo&) const {
+      virtual bool filter (const ExecutorInfo&) const noexcept override {
         return true;
       }
     };
