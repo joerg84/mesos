@@ -32,6 +32,31 @@ namespace mesos {
 
 class ACLs;
 
+
+class ObjectFilter
+{
+public:
+  virtual bool filter(const FrameworkInfo&) const noexcept {
+    return true;
+  }
+
+  virtual bool filter(const ExecutorInfo&) const noexcept {
+    return true;
+  }
+
+  virtual bool filter(const TaskInfo&) const noexcept {
+    return true;
+  }
+
+  // TODO(joerg84): Rebase on changes exposing `Task` to public interface.
+  // virtual bool filter(const Task&) const noexcept {
+  //   return false;
+  // }
+
+  virtual ~ObjectFilter(){}
+};
+
+
 /**
  * This interface is used to enable an identity service or any other
  * back end to check authorization policies for a set of predefined
@@ -93,6 +118,10 @@ public:
    */
   virtual process::Future<bool> authorized(
       const authorization::Request& request) = 0;
+
+  virtual process::Future<process::Owned<ObjectFilter>> getObjectFilter(
+      const Option<std::string>& subject,
+      const authorization::Action& action) = 0;
 
 protected:
   Authorizer() {}

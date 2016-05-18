@@ -40,6 +40,7 @@
 using process::dispatch;
 using process::Failure;
 using process::Future;
+using process::Owned;
 
 using std::string;
 using std::vector;
@@ -252,6 +253,14 @@ public:
     UNREACHABLE();
   }
 
+
+  Future<Owned<ObjectFilter>> getObjectFilter(
+      const Option<string>& subject,
+      const authorization::Action& action)
+  {
+    return Owned<ObjectFilter>(new ObjectFilter());
+  }
+
 private:
   Future<bool> authorized(
       const authorization::Request& request,
@@ -453,6 +462,18 @@ process::Future<bool> LocalAuthorizer::authorized(
       process,
       static_cast<F>(&LocalAuthorizerProcess::authorized),
       request);
+}
+
+
+Future<Owned<ObjectFilter>> LocalAuthorizer::getObjectFilter(
+      const Option<string>& subject,
+      const authorization::Action& action)
+{
+  return dispatch(
+      process,
+      &LocalAuthorizerProcess::getObjectFilter,
+      subject,
+      action);
 }
 
 } // namespace internal {

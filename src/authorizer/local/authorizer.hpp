@@ -64,6 +64,10 @@ public:
   virtual process::Future<bool> authorized(
       const authorization::Request& request);
 
+  virtual process::Future<process::Owned<ObjectFilter>> getObjectFilter(
+      const Option<std::string>& subject,
+      const authorization::Action& action);
+
 private:
   LocalAuthorizer(const ACLs& acls);
 
