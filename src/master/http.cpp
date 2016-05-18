@@ -1946,114 +1946,148 @@ string Master::Http::STATESUMMARY_HELP()
 
 Future<Response> Master::Http::stateSummary(
     const Request& request,
-    const Option<string>& /*principal*/) const
+    const Option<string>& principal) const
 {
   // When current master is not the leader, redirect to the leading master.
   if (!master->elected()) {
     return redirect(request);
   }
 
-  auto stateSummary = [this](JSON::ObjectWriter* writer) {
-    writer->field("hostname", master->info().hostname());
+  Future<Owned<ObjectFilter>> frameworksFilterFuture;
 
-    if (master->flags.cluster.isSome()) {
-      writer->field("cluster", master->flags.cluster.get());
-    }
+  if (master->authorizer.isSome()) {
+    frameworksFilterFuture = master->authorizer.get()->getObjectFilter(
+        principal, authorization::FILTER_FRAMEWORK_WITH_INFO);
+  } else {
+    frameworksFilterFuture = Owned<ObjectFilter>(new ObjectFilter());
+  }
 
-    // We use the tasks in the 'Frameworks' struct to compute summaries
-    // for this endpoint. This is done 1) for consistency between the
-    // 'slaves' and 'frameworks' subsections below 2) because we want to
-    // provide summary information for frameworks that are currently
-    // registered 3) the frameworks keep a circular buffer of completed
-    // tasks that we can use to keep a limited view on the history of
-    // recent completed / failed tasks.
+  std::shared_ptr<process::Promise<Response>> response(
+      new process::Promise<Response>());
 
-    // Generate mappings from 'slave' to 'framework' and reverse.
-    SlaveFrameworkMapping slaveFrameworkMapping(master->frameworks.registered);
+  frameworksFilterFuture.onAny([=](
+      const Future<Owned<ObjectFilter>>& frameworksFilterFuture) {
+    if (!frameworksFilterFuture.isReady()) {
+          LOG(WARNING) << "Authorization failed";
+          response->set(InternalServerError("Error during Authorization"));
+          return;
+        }
 
-    // Generate 'TaskState' summaries for all framework and slave ids.
-    TaskStateSummaries taskStateSummaries(master->frameworks.registered);
+    auto stateSummary = [this, &frameworksFilterFuture](
+        JSON::ObjectWriter* writer) {
+      Owned<ObjectFilter> frameworksFilter = frameworksFilterFuture.get();
 
-    // Model all of the slaves.
-    writer->field("slaves", [this,
-                             &slaveFrameworkMapping,
-                             &taskStateSummaries](JSON::ArrayWriter* writer) {
-      foreachvalue (Slave* slave, master->slaves.registered) {
-        writer->element([&slave,
-                         &slaveFrameworkMapping,
-                         &taskStateSummaries](JSON::ObjectWriter* writer) {
-          json(writer, Summary<Slave>(*slave));
+      writer->field("hostname", master->info().hostname());
 
-          // Add the 'TaskState' summary for this slave.
-          const TaskStateSummary& summary = taskStateSummaries.slave(slave->id);
-
-          writer->field("TASK_STAGING", summary.staging);
-          writer->field("TASK_STARTING", summary.starting);
-          writer->field("TASK_RUNNING", summary.running);
-          writer->field("TASK_KILLING", summary.killing);
-          writer->field("TASK_FINISHED", summary.finished);
-          writer->field("TASK_KILLED", summary.killed);
-          writer->field("TASK_FAILED", summary.failed);
-          writer->field("TASK_LOST", summary.lost);
-          writer->field("TASK_ERROR", summary.error);
-
-          // Add the ids of all the frameworks running on this slave.
-          const hashset<FrameworkID>& frameworks =
-            slaveFrameworkMapping.frameworks(slave->id);
-
-          writer->field("framework_ids",
-                        [&frameworks](JSON::ArrayWriter* writer) {
-            foreach (const FrameworkID& frameworkId, frameworks) {
-              writer->element(frameworkId.value());
-            }
-          });
-        });
+      if (master->flags.cluster.isSome()) {
+        writer->field("cluster", master->flags.cluster.get());
       }
-    });
 
-    // Model all of the frameworks.
-    writer->field("frameworks",
-                  [this,
-                   &slaveFrameworkMapping,
-                   &taskStateSummaries](JSON::ArrayWriter* writer) {
-      foreachpair (const FrameworkID& frameworkId,
-                   Framework* framework,
-                   master->frameworks.registered) {
-        writer->element([&frameworkId,
-                         &framework,
-                         &slaveFrameworkMapping,
-                         &taskStateSummaries](JSON::ObjectWriter* writer) {
-          json(writer, Summary<Framework>(*framework));
+      // We use the tasks in the 'Frameworks' struct to compute summaries
+      // for this endpoint. This is done 1) for consistency between the
+      // 'slaves' and 'frameworks' subsections below 2) because we want to
+      // provide summary information for frameworks that are currently
+      // registered 3) the frameworks keep a circular buffer of completed
+      // tasks that we can use to keep a limited view on the history of
+      // recent completed / failed tasks.
 
-          // Add the 'TaskState' summary for this framework.
-          const TaskStateSummary& summary =
-            taskStateSummaries.framework(frameworkId);
+      // Generate mappings from 'slave' to 'framework' and reverse.
+      SlaveFrameworkMapping slaveFrameworkMapping(
+          master->frameworks.registered);
 
-          writer->field("TASK_STAGING", summary.staging);
-          writer->field("TASK_STARTING", summary.starting);
-          writer->field("TASK_RUNNING", summary.running);
-          writer->field("TASK_KILLING", summary.killing);
-          writer->field("TASK_FINISHED", summary.finished);
-          writer->field("TASK_KILLED", summary.killed);
-          writer->field("TASK_FAILED", summary.failed);
-          writer->field("TASK_LOST", summary.lost);
-          writer->field("TASK_ERROR", summary.error);
+      // Generate 'TaskState' summaries for all framework and slave ids.
+      TaskStateSummaries taskStateSummaries(master->frameworks.registered);
 
-          // Add the ids of all the slaves running this framework.
-          const hashset<SlaveID>& slaves =
-            slaveFrameworkMapping.slaves(frameworkId);
+      // Model all of the slaves.
+      writer->field("slaves", [this,
+                               &slaveFrameworkMapping,
+                               &taskStateSummaries,
+                               &frameworksFilter](JSON::ArrayWriter* writer) {
+        foreachvalue (Slave* slave, master->slaves.registered) {
+          writer->element([&slave,
+                           &slaveFrameworkMapping,
+                           &taskStateSummaries](JSON::ObjectWriter* writer) {
+            json(writer, Summary<Slave>(*slave));
 
-          writer->field("slave_ids", [&slaves](JSON::ArrayWriter* writer) {
-            foreach (const SlaveID& slaveId, slaves) {
-              writer->element(slaveId.value());
-            }
+            // Add the 'TaskState' summary for this slave.
+            const TaskStateSummary& summary =
+              taskStateSummaries.slave(slave->id);
+
+            writer->field("TASK_STAGING", summary.staging);
+            writer->field("TASK_STARTING", summary.starting);
+            writer->field("TASK_RUNNING", summary.running);
+            writer->field("TASK_KILLING", summary.killing);
+            writer->field("TASK_FINISHED", summary.finished);
+            writer->field("TASK_KILLED", summary.killed);
+            writer->field("TASK_FAILED", summary.failed);
+            writer->field("TASK_LOST", summary.lost);
+            writer->field("TASK_ERROR", summary.error);
+
+            // Add the ids of all the frameworks running on this slave.
+            const hashset<FrameworkID>& frameworks =
+              slaveFrameworkMapping.frameworks(slave->id);
+
+            writer->field("framework_ids",
+                          [&frameworks](JSON::ArrayWriter* writer) {
+              foreach (const FrameworkID& frameworkId, frameworks) {
+                writer->element(frameworkId.value());
+              }
+            });
           });
-        });
-      }
-    });
-  };
+        }
+      });
 
-  return OK(jsonify(stateSummary), request.url.query.get("jsonp"));
+      // Model all of the frameworks.
+      writer->field("frameworks",
+                    [this,
+                     &slaveFrameworkMapping,
+                     &taskStateSummaries,
+                     &frameworksFilter](JSON::ArrayWriter* writer) {
+        foreachpair (const FrameworkID& frameworkId,
+                     Framework* framework,
+                     master->frameworks.registered) {
+          // Skip unauthorized frameworks.
+          if (!frameworksFilter->filter(framework->info)) {
+            continue;
+          }
+          writer->element([&frameworkId,
+                           &framework,
+                           &slaveFrameworkMapping,
+                           &taskStateSummaries](JSON::ObjectWriter* writer) {
+            json(writer, Summary<Framework>(*framework));
+
+            // Add the 'TaskState' summary for this framework.
+            const TaskStateSummary& summary =
+              taskStateSummaries.framework(frameworkId);
+
+            writer->field("TASK_STAGING", summary.staging);
+            writer->field("TASK_STARTING", summary.starting);
+            writer->field("TASK_RUNNING", summary.running);
+            writer->field("TASK_KILLING", summary.killing);
+            writer->field("TASK_FINISHED", summary.finished);
+            writer->field("TASK_KILLED", summary.killed);
+            writer->field("TASK_FAILED", summary.failed);
+            writer->field("TASK_LOST", summary.lost);
+            writer->field("TASK_ERROR", summary.error);
+
+            // Add the ids of all the slaves running this framework.
+            const hashset<SlaveID>& slaves =
+              slaveFrameworkMapping.slaves(frameworkId);
+
+            writer->field("slave_ids", [&slaves](JSON::ArrayWriter* writer) {
+              foreach (const SlaveID& slaveId, slaves) {
+                writer->element(slaveId.value());
+              }
+            });
+          });
+        }
+      });
+    };
+
+    response->set(OK(jsonify(stateSummary), request.url.query.get("jsonp")));
+  });
+
+  return response->future();
 }
 
 

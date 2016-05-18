@@ -55,6 +55,156 @@ struct GenericACL
 };
 
 
+class LocalAuthorizerFrameworkObjectFilter : public ObjectFilter
+{
+public:
+  LocalAuthorizerFrameworkObjectFilter(const ACLs _acls,
+     const Option<string>& _subject) : acls(_acls), subject(_subject) {}
+
+  virtual bool filter(
+      const FrameworkInfo& frameworkInfo) const noexcept override{
+    vector<GenericACL> acls_;
+
+    // TODO(joerg84): Refactor matching/allow logic to avoid the need to
+    // construct two ACL:Entitys for subject and object.
+
+    // Construct subject.
+    ACL::Entity aclSubject;
+    if (subject.isSome()) {
+      aclSubject.add_values(subject.get());
+      aclSubject.set_type(mesos::ACL::Entity::SOME);
+    } else {
+      aclSubject.set_type(mesos::ACL::Entity::ANY);
+    }
+
+    // Construct object.
+    ACL::Entity aclObject;
+    aclObject.add_values(frameworkInfo.user());
+    aclObject.set_type(mesos::ACL::Entity::SOME);
+
+    // Authorize subject/object.
+    for (const ACL::ViewFrameworks& acl : acls.view_frameworks()) {
+      if (matches(aclSubject, acl.principals()) &&
+          matches(aclObject, acl.user())) {
+        return allows(aclSubject, acl.principals()) &&
+            allows(aclObject, acl.user());
+      }
+    }
+
+    return this->acls.permissive(); // None of the ACLs match.
+  }
+private:
+  // Match matrix:
+  //
+  //                  -----------ACL----------
+  //
+  //                    SOME    NONE    ANY
+  //          -------|-------|-------|-------
+  //  |        SOME  | Yes/No|  Yes  |   Yes
+  //  |       -------|-------|-------|-------
+  // Request   NONE  |  No   |  Yes  |   No
+  //  |       -------|-------|-------|-------
+  //  |        ANY   |  No   |  Yes  |   Yes
+  //          -------|-------|-------|-------
+  bool matches(const ACL::Entity& request, const ACL::Entity& acl) const
+  {
+    // NONE only matches with NONE.
+    if (request.type() == ACL::Entity::NONE) {
+      return acl.type() == ACL::Entity::NONE;
+    }
+
+    // ANY matches with ANY or NONE.
+    if (request.type() == ACL::Entity::ANY) {
+      return acl.type() == ACL::Entity::ANY || acl.type() == ACL::Entity::NONE;
+    }
+
+    if (request.type() == ACL::Entity::SOME) {
+      // SOME matches with ANY or NONE.
+      if (acl.type() == ACL::Entity::ANY || acl.type() == ACL::Entity::NONE) {
+        return true;
+      }
+
+      // SOME is allowed if the request values are a subset of ACL
+      // values.
+      foreach (const string& value, request.values()) {
+        bool found = false;
+        foreach (const string& value_, acl.values()) {
+          if (value == value_) {
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  // Allow matrix:
+  //
+  //                 -----------ACL----------
+  //
+  //                    SOME    NONE    ANY
+  //          -------|-------|-------|-------
+  //  |        SOME  | Yes/No|  No   |   Yes
+  //  |       -------|-------|-------|-------
+  // Request   NONE  |  No   |  Yes  |   No
+  //  |       -------|-------|-------|-------
+  //  |        ANY   |  No   |  No   |   Yes
+  //          -------|-------|-------|-------
+  bool allows(const ACL::Entity& request, const ACL::Entity& acl) const
+  {
+    // NONE is only allowed by NONE.
+    if (request.type() == ACL::Entity::NONE) {
+      return acl.type() == ACL::Entity::NONE;
+    }
+
+    // ANY is only allowed by ANY.
+    if (request.type() == ACL::Entity::ANY) {
+      return acl.type() == ACL::Entity::ANY;
+    }
+
+    if (request.type() == ACL::Entity::SOME) {
+      // SOME is allowed by ANY.
+      if (acl.type() == ACL::Entity::ANY) {
+        return true;
+      }
+
+      // SOME is not allowed by NONE.
+      if (acl.type() == ACL::Entity::NONE) {
+        return false;
+      }
+
+      // SOME is allowed if the request values are a subset of ACL
+      // values.
+      foreach (const string& value, request.values()) {
+        bool found = false;
+        foreach (const string& value_, acl.values()) {
+          if (value == value_) {
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  ACLs acls;
+  Option<string> subject;
+};
+
 class LocalAuthorizerProcess : public ProtobufProcess<LocalAuthorizerProcess>
 {
 public:
@@ -258,7 +408,14 @@ public:
       const Option<string>& subject,
       const authorization::Action& action)
   {
-    return Owned<ObjectFilter>(new ObjectFilter());
+    switch (action) {
+      case authorization::FILTER_FRAMEWORK_WITH_INFO:
+         return  Owned<ObjectFilter>(new LocalAuthorizerFrameworkObjectFilter(
+            acls, subject));
+      default:
+        return Owned<ObjectFilter>(new ObjectFilter());
+    }
+    UNREACHABLE();
   }
 
 private:
