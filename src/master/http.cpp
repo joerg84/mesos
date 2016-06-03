@@ -695,7 +695,7 @@ Future<Response> Master::Http::api(
     case v1::master::Call::STORE_STATE:
       return NotImplemented();
 
-    case v1::master::Call::GET_STATE:
+    case v1::master::Call::FETCH_STATE:
       return NotImplemented();
 
     case v1::master::Call::EXPUNGE_STATE:

@@ -1302,6 +1302,10 @@ private:
         const v1::master::Call& call,
         const Option<std::string>& principal) const;
 
+    process::Future<v1::master::Response> fetchState(
+        const v1::master::Call& call,
+        const Option<std::string>& principal) const;
+
     Master* master;
 
     // NOTE: The quota specific pieces of the Operator API are factored

@@ -198,6 +198,24 @@ Option<Error> validate(
       }
       return None();
 
+    case v1::master::Call::STORE_STATE:
+      if (!call.has_store_state()) {
+        return Error("Expecting 'store_state' to be present");
+      }
+      return None();
+
+    case v1::master::Call::FETCH_STATE:
+      if (!call.has_fetch_state()) {
+        return Error("Expecting 'fetch_state' to be present");
+      }
+      return None();
+
+    case v1::master::Call::EXPUNGE_STATE:
+      if (!call.has_expunge_state()) {
+        return Error("Expecting 'expunge_state' to be present");
+      }
+      return None();
+
     case v1::master::Call::SUBSCRIBE:
       return None();
   }

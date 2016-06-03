@@ -89,7 +89,7 @@ message Call {
     FETCH_STATE = 32;
     EXPUNGE_STATE = 33;
   }
-FETCH_STATE
+
   message GetMetrics {
     optional string timeout = 1;
   }
@@ -233,7 +233,7 @@ message Response {
 
     GET_QUOTA = 18;
 
-    GET_STATE = 19;
+    FETCH_STATE = 19;
   }
 
   message GetHealth {
