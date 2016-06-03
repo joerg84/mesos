@@ -692,6 +692,15 @@ Future<Response> Master::Http::api(
     case v1::master::Call::REMOVE_QUOTA:
       return NotImplemented();
 
+    case v1::master::Call::STORE_STATE:
+      return NotImplemented();
+
+    case v1::master::Call::GET_STATE:
+      return NotImplemented();
+
+    case v1::master::Call::EXPUNGE_STATE:
+      return NotImplemented();
+
     case v1::master::Call::SUBSCRIBE:
       return NotImplemented();
   }
@@ -1365,6 +1374,24 @@ Future<v1::master::Response> Master::Http::getLeadingMaster(
     const Option<string>& principal) const
 {
   CHECK_EQ(v1::master::Call::GET_LEADING_MASTER, call.type());
+
+  v1::master::Response response;
+  response.set_type(v1::master::Response::GET_LEADING_MASTER);
+
+  // It is guaranteed that this master has been elected as the leader.
+  CHECK(master->elected());
+
+  response.mutable_get_leading_master()->mutable_master_info()->CopyFrom(
+    evolve(master->info()));
+
+  return response;
+}
+
+Future<v1::master::Response> Master::Http::fetchState(
+    const v1::master::Call& call,
+    const Option<string>& principal) const
+{
+  CHECK_EQ(v1::master::Call::STORE_STATE, call.type());
 
   v1::master::Response response;
   response.set_type(v1::master::Response::GET_LEADING_MASTER);

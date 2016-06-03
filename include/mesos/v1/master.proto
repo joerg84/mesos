@@ -83,8 +83,13 @@ message Call {
     GET_QUOTA = 28;
     SET_QUOTA = 29;
     REMOVE_QUOTA = 30;
-  }
 
+    // State
+    STORE_STATE = 31;
+    FETCH_STATE = 32;
+    EXPUNGE_STATE = 33;
+  }
+FETCH_STATE
   message GetMetrics {
     optional string timeout = 1;
   }
@@ -154,6 +159,22 @@ message Call {
     required string role = 1;
   }
 
+  message StoreState {
+    required string key = 1;
+    required string data = 2;
+    optional string storage = 3 [default = "master"];
+  }
+
+  message FetchState {
+    required string key = 1;
+    optional string storage = 2 [default = "master"];
+  }
+
+  message ExpungeState {
+    required string key = 1;
+    optional string storage = 2 [default = "master"];
+  }
+
   optional Type type = 1;
 
   optional GetMetrics get_metrics = 2;
@@ -170,6 +191,9 @@ message Call {
   optional StopMaintenance stop_maintenance  = 13;
   optional SetQuota set_quota = 14;
   optional RemoveQuota remove_quota = 15;
+  optional StoreState store_state = 16;
+  optional FetchState fetch_state = 17;
+  optional ExpungeState expunge_state = 18;
 }
 
 
@@ -208,6 +232,8 @@ message Response {
     GET_MAINTENANCE_SCHEDULE = 17;
 
     GET_QUOTA = 18;
+
+    GET_STATE = 19;
   }
 
   message GetHealth {
@@ -298,6 +324,10 @@ message Response {
     required quota.QuotaStatus status = 1;
   }
 
+  message FetchState {
+    required string data = 1;
+  }
+
   optional Type type = 1;
 
   optional GetHealth get_health = 2;
@@ -318,6 +348,7 @@ message Response {
   optional GetMaintenanceStatus get_maintenance_status = 17;
   optional GetMaintenanceSchedule get_maintenance_schedule = 18;
   optional GetQuota get_quota = 19;
+  optional FetchState fetch_state = 20;
 }
 
 
