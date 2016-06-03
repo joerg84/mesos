@@ -761,6 +761,7 @@ libmesos_no_3rdparty_la_SOURCES +=					\
   master/quota.cpp							\
   master/quota_handler.cpp						\
   master/registrar.cpp							\
+  master/storage.cpp							\
   master/validation.cpp							\
   master/weights.cpp							\
   master/weights_handler.cpp						\
